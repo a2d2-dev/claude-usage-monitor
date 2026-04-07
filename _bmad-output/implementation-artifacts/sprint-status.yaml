@@ -15,15 +15,15 @@ development_status:
   2-2-data-aggregation-payload: done
   epic-2-retrospective: optional
 
-  epic-3: backlog
-  3-1-backend-init-d1-schema: backlog
-  3-2-auth-verify-endpoint: backlog
-  3-3-upload-endpoint: backlog
-  3-4-leaderboard-api: backlog
+  epic-3: done
+  3-1-backend-init-d1-schema: done
+  3-2-auth-verify-endpoint: done
+  3-3-upload-endpoint: done
+  3-4-leaderboard-api: done
   epic-3-retrospective: optional
 
-  epic-4: backlog
-  4-1-leaderboard-web-page: backlog
-  4-2-personal-stats-page: backlog
-  4-3-og-image-generation: backlog
+  epic-4: done
+  4-1-leaderboard-web-page: done
+  4-2-personal-stats-page: done
+  4-3-og-image-generation: done
   epic-4-retrospective: optional

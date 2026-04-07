@@ -1,0 +1,19 @@
+name = "claude-top"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "claude-top-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+# KV namespace for leaderboard cache
+[[kv_namespaces]]
+binding = "LEADERBOARD"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Secrets (set via: wrangler secret put JWT_SECRET)
+# JWT_SECRET = "..."
+# GITHUB_CLIENT_ID = "..."
