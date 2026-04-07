@@ -4,9 +4,6 @@
   "description": "Linux x64 binary for @a2d2/claude-monitor",
   "os": ["linux"],
   "cpu": ["x64"],
-  "bin": {
-    "claude-monitor": "bin/claude-monitor"
-  },
   "files": ["bin/claude-monitor"],
   "license": "MIT",
   "repository": {

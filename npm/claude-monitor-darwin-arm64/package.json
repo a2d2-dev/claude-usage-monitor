@@ -4,9 +4,6 @@
   "description": "macOS Apple Silicon binary for @a2d2/claude-monitor",
   "os": ["darwin"],
   "cpu": ["arm64"],
-  "bin": {
-    "claude-monitor": "bin/claude-monitor"
-  },
   "files": ["bin/claude-monitor"],
   "license": "MIT",
   "repository": {
