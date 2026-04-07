@@ -1,11 +1,14 @@
 package ui
 
 import (
+	"context"
+	"fmt"
 	"sort"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/a2d2-dev/claude-usage-monitor/internal/auth"
 	"github.com/a2d2-dev/claude-usage-monitor/internal/core"
 	"github.com/a2d2-dev/claude-usage-monitor/internal/data"
 )
@@ -33,8 +36,9 @@ var tabNames = []string{"Overview", "Sessions", "Daily"}
 type viewMode int
 
 const (
-	viewList   viewMode = iota
-	viewDetail // detail for the row under cursor
+	viewList      viewMode = iota
+	viewDetail    // detail for the row under cursor
+	viewMsgDetail // full detail for the selected message
 )
 
 // sortCol selects which column to sort the sessions table by.
@@ -64,6 +68,56 @@ const (
 )
 
 
+// ── Auth state ────────────────────────────────────────────────────────────────
+
+// authPhase tracks the stage of the GitHub Device Flow.
+type authPhase int
+
+const (
+	authIdle        authPhase = iota // not in auth flow
+	authRequesting                   // requesting device code from GitHub
+	authShowingCode                  // displaying code to user, polling in background
+	authVerifying                    // exchanging GitHub token for backend JWT
+	authSuccess                      // auth complete
+	authError                        // auth failed
+)
+
+// authState holds all state for the GitHub Device Flow overlay.
+type authState struct {
+	phase           authPhase
+	userCode        string // e.g. "WDJB-MJHT"
+	verificationURI string // e.g. "https://github.com/login/device"
+	deviceCode      string // opaque code used to poll for the token
+	pollInterval    int    // seconds between polls
+	login           string // populated on success
+	errMsg          string // populated on error
+}
+
+// ── Auth tea messages ──────────────────────────────────────────────────────────
+
+// authCodeMsg is sent when the device code has been received from GitHub.
+type authCodeMsg struct {
+	UserCode        string
+	VerificationURI string
+	DeviceCode      string
+	Interval        int
+	Err             error
+}
+
+// authPollMsg is sent after each poll of the GitHub token endpoint.
+type authPollMsg struct {
+	AccessToken string // non-empty = user has authorised
+	Pending     bool   // true = "authorization_pending" or "slow_down"
+	SlowDown    bool   // true = must increase interval
+	Err         error  // non-nil = unrecoverable error
+}
+
+// authJWTMsg is sent when the backend /auth/verify call completes.
+type authJWTMsg struct {
+	Login string
+	Err   error
+}
+
 // ── Message types ─────────────────────────────────────────────────────────────
 
 // tickMsg is sent on each refresh tick.
@@ -87,20 +141,21 @@ type sessionsState struct {
 	detailMsgCursor int           // selected message index in detail view
 	detailSort      detailSortCol // sort column for message table in detail view
 	detailSortAsc   bool          // sort direction for message table
+	copyFeedback    string        // set briefly after clipboard copy ("Copied!" or "Copy failed")
 }
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
 // Model is the bubbletea application model.
 type Model struct {
-	blocks  []data.SessionBlock
-	daily   []data.DailyStats
-	plan    core.Plan
+	blocks   []data.SessionBlock
+	daily    []data.DailyStats
+	plan     core.Plan
 	dataPath string
-	width   int
-	height  int
-	loading bool
-	err     error
+	width    int
+	height   int
+	loading  bool
+	err      error
 
 	// refreshing is true while a full disk refresh runs in the background.
 	refreshing  bool
@@ -112,6 +167,9 @@ type Model struct {
 	// Per-tab state.
 	sessions sessionsState
 	dailyCur int // cursor row in Daily tab
+
+	// Auth overlay — active when auth.phase != authIdle.
+	authOverlay authState
 }
 
 // NewModel creates a Model with the given plan and data path.
@@ -170,6 +228,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case authCodeMsg:
+		return m.handleAuthCodeMsg(msg)
+
+	case authPollMsg:
+		return m.handleAuthPollMsg(msg)
+
+	case authJWTMsg:
+		return m.handleAuthJWTMsg(msg)
+
 	case tea.KeyMsg:
 		return m.handleKey(msg.String())
 	}
@@ -178,6 +245,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleKey routes key presses to the appropriate handler.
 func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
+	// Auth overlay captures all keys while active.
+	if m.authOverlay.phase != authIdle {
+		return m.handleAuthKey(key)
+	}
+
 	// Global keys.
 	switch key {
 	case "q", "ctrl+c":
@@ -185,6 +257,9 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 	case "r":
 		m.refreshing = true
 		return m, loadData(m.dataPath)
+	case "u":
+		// Upload / auth: check existing auth before starting Device Flow.
+		return m.handleUploadKey()
 	// Tab switching.
 	case "1":
 		m.tab = tabOverview
@@ -215,13 +290,40 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 
 // handleSessionsKey processes keys when the Sessions tab is active.
 func (m Model) handleSessionsKey(key string) (tea.Model, tea.Cmd) {
-	// Detail view: navigate messages, sort, or go back.
-	if m.sessions.view == viewDetail {
-		sel := m.selectedSession()
-		msgCount := 0
+	sel := m.selectedSession()
+
+	// Message detail view: full token breakdown for one message.
+	if m.sessions.view == viewMsgDetail {
+		var msgs []data.UsageEntry
 		if sel != nil {
-			msgCount = len(sel.Entries)
+			msgs = sortedEntries(sel.Entries, m.sessions.detailSort, m.sessions.detailSortAsc)
 		}
+		switch key {
+		case "esc", "backspace":
+			m.sessions.view = viewDetail
+			m.sessions.copyFeedback = ""
+		case "y", "c":
+			if sel != nil && len(msgs) > 0 && m.sessions.detailMsgCursor < len(msgs) {
+				text := formatMsgForCopy(msgs[m.sessions.detailMsgCursor], sel.CostUSD)
+				if err := copyToClipboard(text); err == nil {
+					m.sessions.copyFeedback = "Copied!"
+				} else {
+					m.sessions.copyFeedback = "Copy failed: " + err.Error()
+				}
+			}
+		default:
+			m.sessions.copyFeedback = ""
+		}
+		return m, nil
+	}
+
+	// Detail view: navigate messages table, sort, left/right by time, or go back.
+	if m.sessions.view == viewDetail {
+		var msgs []data.UsageEntry
+		if sel != nil {
+			msgs = sortedEntries(sel.Entries, m.sessions.detailSort, m.sessions.detailSortAsc)
+		}
+		msgCount := len(msgs)
 		switch key {
 		case "esc", "backspace":
 			m.sessions.view = viewList
@@ -234,6 +336,12 @@ func (m Model) handleSessionsKey(key string) (tea.Model, tea.Cmd) {
 			if m.sessions.detailMsgCursor < msgCount-1 {
 				m.sessions.detailMsgCursor++
 			}
+		case "left":
+			// Navigate to the previous message chronologically.
+			m.sessions.detailMsgCursor = chronologicalAdjacent(msgs, m.sessions.detailMsgCursor, false)
+		case "right":
+			// Navigate to the next message chronologically.
+			m.sessions.detailMsgCursor = chronologicalAdjacent(msgs, m.sessions.detailMsgCursor, true)
 		case "g", "home":
 			m.sessions.detailMsgCursor = 0
 		case "G", "end":
@@ -249,10 +357,16 @@ func (m Model) handleSessionsKey(key string) (tea.Model, tea.Cmd) {
 		case "/":
 			m.sessions.detailSortAsc = !m.sessions.detailSortAsc
 			m.sessions.detailMsgCursor = 0
+		case "enter":
+			if msgCount > 0 {
+				m.sessions.view = viewMsgDetail
+				m.sessions.copyFeedback = ""
+			}
 		}
 		return m, nil
 	}
 
+	// List view: navigate sessions.
 	rows := m.sessionRows()
 	visible := m.sessionsVisibleRows()
 
@@ -297,6 +411,41 @@ func (m Model) handleSessionsKey(key string) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// chronologicalAdjacent returns the index in msgs of the message immediately
+// before (forward=false) or after (forward=true) msgs[cursor] by timestamp.
+// Returns cursor unchanged if there is no adjacent message in that direction.
+func chronologicalAdjacent(msgs []data.UsageEntry, cursor int, forward bool) int {
+	if len(msgs) == 0 || cursor < 0 || cursor >= len(msgs) {
+		return cursor
+	}
+	curTS := msgs[cursor].Timestamp
+	var targetTS time.Time
+	found := false
+
+	for _, e := range msgs {
+		if forward {
+			if e.Timestamp.After(curTS) && (!found || e.Timestamp.Before(targetTS)) {
+				targetTS = e.Timestamp
+				found = true
+			}
+		} else {
+			if e.Timestamp.Before(curTS) && (!found || e.Timestamp.After(targetTS)) {
+				targetTS = e.Timestamp
+				found = true
+			}
+		}
+	}
+	if !found {
+		return cursor
+	}
+	for i, e := range msgs {
+		if e.Timestamp.Equal(targetTS) {
+			return i
+		}
+	}
+	return cursor
 }
 
 // handleDailyKey processes keys when the Daily tab is active.
@@ -442,5 +591,152 @@ func loadData(dataPath string) tea.Cmd {
 		}
 		blocks := core.BuildSessionBlocks(entries)
 		return loadedMsg{blocks: blocks}
+	}
+}
+
+// ── Auth handlers ─────────────────────────────────────────────────────────────
+
+// handleUploadKey is called when the user presses `u`.
+// It checks stored auth and either starts the Device Flow or proceeds to upload.
+func (m Model) handleUploadKey() (tea.Model, tea.Cmd) {
+	info, _ := auth.LoadAuth()
+	if auth.IsAuthValid(info) {
+		// Already authenticated — show a brief message (upload confirm is Story 2.1).
+		m.authOverlay = authState{
+			phase: authSuccess,
+			login: info.GitHubLogin,
+		}
+		return m, nil
+	}
+	// Start Device Flow.
+	m.authOverlay = authState{phase: authRequesting}
+	return m, requestDeviceCodeCmd()
+}
+
+// handleAuthKey handles keys while the auth overlay is showing.
+func (m Model) handleAuthKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "esc", "q":
+		// Cancel auth and return to normal UI.
+		m.authOverlay = authState{phase: authIdle}
+		return m, nil
+	case "enter":
+		// Dismiss success / error screens.
+		if m.authOverlay.phase == authSuccess || m.authOverlay.phase == authError {
+			m.authOverlay = authState{phase: authIdle}
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleAuthCodeMsg processes the result of requesting a device code.
+func (m Model) handleAuthCodeMsg(msg authCodeMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		m.authOverlay = authState{phase: authError, errMsg: msg.Err.Error()}
+		return m, nil
+	}
+	m.authOverlay = authState{
+		phase:           authShowingCode,
+		userCode:        msg.UserCode,
+		verificationURI: msg.VerificationURI,
+		deviceCode:      msg.DeviceCode,
+		pollInterval:    msg.Interval,
+	}
+	return m, pollTokenCmd(msg.DeviceCode, msg.Interval)
+}
+
+// handleAuthPollMsg processes the result of one GitHub token poll.
+func (m Model) handleAuthPollMsg(msg authPollMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		m.authOverlay = authState{phase: authError, errMsg: msg.Err.Error()}
+		return m, nil
+	}
+	if msg.Pending {
+		// Still waiting — keep polling. Increase interval on slow_down.
+		interval := m.authOverlay.pollInterval
+		if msg.SlowDown && interval < 30 {
+			interval += 5
+		}
+		m.authOverlay.pollInterval = interval
+		return m, pollTokenCmd(m.authOverlay.deviceCode, interval)
+	}
+	// Got the access token — verify with backend.
+	m.authOverlay.phase = authVerifying
+	return m, verifyWithBackendCmd(msg.AccessToken)
+}
+
+// handleAuthJWTMsg processes the result of the backend /auth/verify call.
+func (m Model) handleAuthJWTMsg(msg authJWTMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		m.authOverlay = authState{phase: authError, errMsg: msg.Err.Error()}
+		return m, nil
+	}
+	m.authOverlay = authState{phase: authSuccess, login: msg.Login}
+	return m, nil
+}
+
+// ── Auth commands ─────────────────────────────────────────────────────────────
+
+// requestDeviceCodeCmd asks GitHub for a device code (runs in background).
+func requestDeviceCodeCmd() tea.Cmd {
+	return func() tea.Msg {
+		resp, err := auth.RequestDeviceCode(context.Background())
+		if err != nil {
+			return authCodeMsg{Err: err}
+		}
+		return authCodeMsg{
+			UserCode:        resp.UserCode,
+			VerificationURI: resp.VerificationURI,
+			DeviceCode:      resp.DeviceCode,
+			Interval:        resp.Interval,
+		}
+	}
+}
+
+// pollTokenCmd waits interval seconds then polls GitHub for the access token.
+func pollTokenCmd(deviceCode string, interval int) tea.Cmd {
+	return func() tea.Msg {
+		resp, err := auth.PollToken(context.Background(), deviceCode, interval)
+		if err != nil {
+			return authPollMsg{Err: err}
+		}
+		switch resp.Error {
+		case "":
+			// Success.
+			return authPollMsg{AccessToken: resp.AccessToken}
+		case "authorization_pending":
+			return authPollMsg{Pending: true}
+		case "slow_down":
+			return authPollMsg{Pending: true, SlowDown: true}
+		default:
+			return authPollMsg{Err: fmt.Errorf("github: %s — %s", resp.Error, resp.ErrorDescription)}
+		}
+	}
+}
+
+// verifyWithBackendCmd exchanges a GitHub access_token for a backend JWT.
+func verifyWithBackendCmd(accessToken string) tea.Cmd {
+	return func() tea.Msg {
+		device, err := auth.EnsureDevice()
+		if err != nil {
+			return authJWTMsg{Err: fmt.Errorf("device setup: %w", err)}
+		}
+		resp, err := auth.VerifyWithBackend(context.Background(), device.DeviceID, accessToken)
+		if err != nil {
+			return authJWTMsg{Err: err}
+		}
+		// Persist auth info locally.
+		info := &auth.AuthInfo{
+			JWT:         resp.JWT,
+			GitHubID:    resp.GitHubID,
+			GitHubLogin: resp.GitHubLogin,
+			AvatarURL:   resp.AvatarURL,
+			ExpiresAt:   resp.ExpiresAt,
+		}
+		if saveErr := auth.SaveAuth(info); saveErr != nil {
+			return authJWTMsg{Err: fmt.Errorf("save auth: %w", saveErr)}
+		}
+		return authJWTMsg{Login: resp.GitHubLogin}
 	}
 }

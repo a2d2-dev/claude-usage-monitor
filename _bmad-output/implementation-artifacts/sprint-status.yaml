@@ -1,0 +1,29 @@
+generated: 2026-04-08
+project: claude-top
+project_key: claude-top-mvp
+tracking_system: file-system
+story_location: "_bmad-output/implementation-artifacts/stories"
+
+development_status:
+  epic-1: in-progress
+  1-1-github-device-flow-auth: done
+  1-2-device-uuid-management: done
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-upload-confirm-ui: backlog
+  2-2-data-aggregation-payload: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-backend-init-d1-schema: backlog
+  3-2-auth-verify-endpoint: backlog
+  3-3-upload-endpoint: backlog
+  3-4-leaderboard-api: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-leaderboard-web-page: backlog
+  4-2-personal-stats-page: backlog
+  4-3-og-image-generation: backlog
+  epic-4-retrospective: optional

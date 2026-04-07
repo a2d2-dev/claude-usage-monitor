@@ -16,6 +16,7 @@ import (
 // ── Dashboard orchestrator ────────────────────────────────────────────────────
 
 // RenderDashboard assembles header + active tab content + footer.
+// When the auth overlay is active it replaces the content area.
 func RenderDashboard(m Model) string {
 	header := renderHeader(m)
 	tabBar := renderTabBar(m)
@@ -25,6 +26,12 @@ func RenderDashboard(m Model) string {
 	contentH := m.height - 3
 	if contentH < 4 {
 		contentH = 4
+	}
+
+	// Auth overlay takes over the content area.
+	if m.authOverlay.phase != authIdle {
+		content := renderAuthOverlay(m, contentH)
+		return strings.Join([]string{header, tabBar, content, footer}, "\n")
 	}
 
 	var content string
@@ -79,19 +86,32 @@ func renderTabBar(m Model) string {
 // ── Footer ────────────────────────────────────────────────────────────────────
 
 func renderFooter(m Model) string {
+	// Auth overlay has its own footer hint.
+	if m.authOverlay.phase != authIdle {
+		switch m.authOverlay.phase {
+		case authShowingCode:
+			return mutedStyle.Render("  ESC cancel")
+		case authSuccess, authError:
+			return mutedStyle.Render("  Enter/ESC dismiss")
+		default:
+			return mutedStyle.Render("  ESC cancel")
+		}
+	}
+
 	var hint string
 	switch m.tab {
 	case tabSessions:
-		if m.sessions.view == viewDetail {
-			hint = "" // hint is rendered inside the card
-		} else {
-			hint = fmt.Sprintf("  ↑↓ cursor  Enter detail  s/S sort(%s)  / direction  Tab switch  q quit",
+		switch m.sessions.view {
+		case viewDetail, viewMsgDetail:
+			hint = "" // hint is rendered inside renderDetailPanel
+		default:
+			hint = fmt.Sprintf("  ↑↓ cursor  Enter detail  u upload  s/S sort(%s)  / direction  Tab switch  q quit",
 				sortColNames[m.sessions.sortColumn])
 		}
 	case tabDaily:
 		hint = "  ↑↓ cursor  Tab switch  q quit"
 	default:
-		hint = "  1-3 tabs  Tab switch  r refresh  q quit"
+		hint = "  1-3 tabs  Tab switch  u upload  r refresh  q quit"
 	}
 	return mutedStyle.Render(hint)
 }
@@ -357,6 +377,82 @@ func renderMsgRow(e data.UsageEntry, sessionCost float64, promptW int, isCursor 
 	}, " ")
 }
 
+// renderMsgDetailContent renders the full token breakdown and prompt for one message.
+// contentH is the available height (lines) inside the box excluding the title row.
+func renderMsgDetailContent(e data.UsageEntry, sessionCost float64, innerW, contentH int) string {
+	total := e.InputTokens + e.OutputTokens + e.CacheCreationTokens + e.CacheReadTokens
+	pct := func(n int) float64 {
+		if total == 0 {
+			return 0
+		}
+		return float64(n) / float64(total) * 100
+	}
+	costPct := 0.0
+	if sessionCost > 0 {
+		costPct = e.CostUSD / sessionCost * 100
+	}
+
+	barW := min(30, innerW-38)
+	if barW < 4 {
+		barW = 4
+	}
+	tokenBar := func(n int, c lipgloss.Color) string {
+		p := pct(n)
+		filled := int(math.Round(float64(barW) * p / 100))
+		if filled > barW {
+			filled = barW
+		}
+		return lipgloss.NewStyle().Foreground(c).Render(strings.Repeat("█", filled)) +
+			mutedStyle.Render(strings.Repeat("░", barW-filled))
+	}
+
+	lines := []string{
+		fmt.Sprintf("  %s  %s",
+			labelStyle.Render("Time: "), valueStyle.Render(e.Timestamp.Local().Format("2006-01-02 15:04:05"))),
+		fmt.Sprintf("  %s  %s",
+			labelStyle.Render("Model:"), lipgloss.NewStyle().Foreground(modelColor(e.Model)).Bold(true).Render(e.Model)),
+		fmt.Sprintf("  %s  %s  %s",
+			labelStyle.Render("Cost: "),
+			accentValueStyle.Render(fmt.Sprintf("$%.6f", e.CostUSD)),
+			mutedStyle.Render(fmt.Sprintf("(%.1f%% of session)", costPct))),
+		"",
+		sectionTitleStyle.Render("  TOKEN BREAKDOWN"),
+		fmt.Sprintf("  %s  [%s]  %6s  %5.1f%%",
+			labelStyle.Render("Input  "), tokenBar(e.InputTokens, lipgloss.Color("#60A5FA")),
+			formatInt(e.InputTokens), pct(e.InputTokens)),
+		fmt.Sprintf("  %s  [%s]  %6s  %5.1f%%",
+			labelStyle.Render("Output "), tokenBar(e.OutputTokens, lipgloss.Color("#34D399")),
+			formatInt(e.OutputTokens), pct(e.OutputTokens)),
+		fmt.Sprintf("  %s  [%s]  %6s  %5.1f%%",
+			labelStyle.Render("Cache R"), tokenBar(e.CacheReadTokens, lipgloss.Color("#A78BFA")),
+			formatInt(e.CacheReadTokens), pct(e.CacheReadTokens)),
+		fmt.Sprintf("  %s  [%s]  %6s  %5.1f%%  %s",
+			labelStyle.Render("Cache W"), tokenBar(e.CacheCreationTokens, lipgloss.Color("#FBBF24")),
+			formatInt(e.CacheCreationTokens), pct(e.CacheCreationTokens),
+			mutedStyle.Render("[3.75× cost weight]")),
+		fmt.Sprintf("  %s  %s total",
+			labelStyle.Render("Total  "), valueStyle.Render(formatInt(total))),
+	}
+
+	if e.UserPrompt != "" {
+		lines = append(lines, "", sectionTitleStyle.Render("  PROMPT"))
+		promptW := innerW - 4
+		if promptW < 10 {
+			promptW = 10
+		}
+		for _, rawLine := range strings.Split(e.UserPrompt, "\n") {
+			runes := []rune(rawLine)
+			for len(runes) > promptW {
+				lines = append(lines, "  "+string(runes[:promptW]))
+				runes = runes[promptW:]
+			}
+			lines = append(lines, "  "+string(runes))
+		}
+	}
+
+	return padToHeight(strings.Join(lines, "\n"), contentH)
+}
+
 // sessionUpdatedAt returns the effective end time of a session block.
 func sessionUpdatedAt(s *data.SessionBlock) time.Time {
 	if s.ActualEndTime != nil {
@@ -491,17 +587,42 @@ func renderDetailPanel(m Model, s *data.SessionBlock, height int) string {
 	chartBox := cardStyle.Width(boxW).Render(chartContent)
 	chartH := strings.Count(chartBox, "\n") + 1
 
-	// ── Messages box ──────────────────────────────────────────────────────────
-	// hint line sits below the messages box.
-	hint := mutedStyle.Render("  ↑↓ select  s/S sort  / dir  ESC back")
-	msgsBoxH := height - headH - chartH - 1
-	if msgsBoxH < 5 {
-		msgsBoxH = 5
+	// Bottom box fills the remaining height (hint line sits below).
+	bottomBoxH := height - headH - chartH - 1
+	if bottomBoxH < 5 {
+		bottomBoxH = 5
 	}
-	// Content height inside the box = total height - 2 border lines.
-	msgsContentH := msgsBoxH - 2
-	msgsContent := renderDetailMsgsContent(m, s, msgs, innerW, msgsContentH)
-	msgsBox := activeCardStyle.Width(boxW).Height(msgsContentH).Render(msgsContent)
+	bottomContentH := bottomBoxH - 2
+
+	// ── Message detail box (viewMsgDetail) ────────────────────────────────────
+	if m.sessions.view == viewMsgDetail {
+		var selected data.UsageEntry
+		if len(msgs) > 0 && m.sessions.detailMsgCursor < len(msgs) {
+			selected = msgs[m.sessions.detailMsgCursor]
+		}
+		progress := ""
+		if len(msgs) > 0 {
+			progress = mutedStyle.Render(fmt.Sprintf(" [%d/%d]", m.sessions.detailMsgCursor+1, len(msgs)))
+		}
+		detailTitle := "  " + sectionTitleStyle.Render("Message Detail") + progress + "\n"
+		detailBox := activeCardStyle.Width(boxW).Height(bottomContentH).Render(
+			detailTitle + renderMsgDetailContent(selected, s.CostUSD, innerW, bottomContentH-1),
+		)
+
+		var hint string
+		if m.sessions.copyFeedback != "" {
+			hint = "  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#34D399")).Bold(true).Render("✓ "+m.sessions.copyFeedback) +
+				"  " + mutedStyle.Render("ESC back")
+		} else {
+			hint = mutedStyle.Render("  y/c copy  ESC back")
+		}
+		return strings.Join([]string{headBox, chartBox, detailBox, hint}, "\n")
+	}
+
+	// ── Messages box (viewDetail) ─────────────────────────────────────────────
+	hint := mutedStyle.Render("  ↑↓ select  ←→ time  Enter detail  s/S sort  / dir  ESC back")
+	msgsContent := renderDetailMsgsContent(m, s, msgs, innerW, bottomContentH)
+	msgsBox := activeCardStyle.Width(boxW).Height(bottomContentH).Render(msgsContent)
 
 	return strings.Join([]string{headBox, chartBox, msgsBox, hint}, "\n")
 }
@@ -512,6 +633,17 @@ func RenderDetailPanelForTest(block data.SessionBlock, width, height int) string
 	m := NewModel("pro", "")
 	m.width = width
 	m.height = height
+	return renderDetailPanel(m, &block, height-3)
+}
+
+// RenderMsgDetailPanelForTest renders the message detail view for the first
+// message in block. Used by cmd/bench for visual layout verification.
+func RenderMsgDetailPanelForTest(block data.SessionBlock, width, height int) string {
+	m := NewModel("pro", "")
+	m.width = width
+	m.height = height
+	m.sessions.view = viewMsgDetail
+	m.sessions.detailMsgCursor = 0
 	return renderDetailPanel(m, &block, height-3)
 }
 
@@ -605,4 +737,70 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// ── Auth overlay ──────────────────────────────────────────────────────────────
+
+// renderAuthOverlay renders the GitHub Device Flow authentication panel,
+// replacing the normal content area. It shows different content per auth phase.
+func renderAuthOverlay(m Model, height int) string {
+	st := m.authOverlay
+	innerW := m.width - 4
+
+	var lines []string
+
+	switch st.phase {
+	case authRequesting:
+		lines = []string{
+			sectionTitleStyle.Render("  GitHub 认证"),
+			"",
+			mutedStyle.Render("  正在向 GitHub 申请设备码…"),
+		}
+
+	case authShowingCode:
+		lines = []string{
+			sectionTitleStyle.Render("  GitHub 认证 — 请完成以下步骤"),
+			"",
+			"  1. 打开浏览器，访问：",
+			"",
+			accentValueStyle.Render("     " + st.verificationURI),
+			"",
+			"  2. 在页面中输入以下验证码：",
+			"",
+			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).
+				Background(lipgloss.Color("#374151")).Padding(0, 2).
+				Render("     " + st.userCode),
+			"",
+			mutedStyle.Render("  认证完成后此窗口将自动关闭…"),
+		}
+
+	case authVerifying:
+		lines = []string{
+			sectionTitleStyle.Render("  GitHub 认证"),
+			"",
+			mutedStyle.Render("  正在与服务器验证身份…"),
+		}
+
+	case authSuccess:
+		lines = []string{
+			sectionTitleStyle.Render("  ✓ 认证成功"),
+			"",
+			lipgloss.NewStyle().Foreground(colorSuccess).Render(
+				fmt.Sprintf("  欢迎，@%s！", st.login)),
+			"",
+			mutedStyle.Render("  按 Enter 继续"),
+		}
+
+	case authError:
+		lines = []string{
+			lipgloss.NewStyle().Bold(true).Foreground(colorDanger).Render("  ✗ 认证失败"),
+			"",
+			lipgloss.NewStyle().Foreground(colorWarning).Render("  " + st.errMsg),
+			"",
+			mutedStyle.Render("  按 ESC 关闭"),
+		}
+	}
+
+	content := padToHeight(strings.Join(lines, "\n"), height-2)
+	return cardStyle.Width(innerW).Height(height - 2).Render(content)
 }
