@@ -1,0 +1,22 @@
+{
+  "name": "@a2d2/claude-top",
+  "version": "0.0.0",
+  "description": "Terminal UI for monitoring Claude Code token and cost usage",
+  "bin": {
+    "claude-top": "bin/claude-top.js"
+  },
+  "files": ["bin/claude-top.js"],
+  "optionalDependencies": {
+    "@a2d2/claude-top-darwin-arm64": "0.0.0",
+    "@a2d2/claude-top-darwin-x64": "0.0.0",
+    "@a2d2/claude-top-linux-x64": "0.0.0",
+    "@a2d2/claude-top-linux-arm64": "0.0.0",
+    "@a2d2/claude-top-windows-x64": "0.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/a2d2-dev/claude-usage-monitor"
+  },
+  "keywords": ["claude", "anthropic", "token", "usage", "monitor", "tui"]
+}

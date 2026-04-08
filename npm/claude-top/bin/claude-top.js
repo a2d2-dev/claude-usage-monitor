@@ -6,16 +6,16 @@ const path = require("path");
 
 // Map Node.js platform/arch to our npm package names.
 const PLATFORM_MAP = {
-  "darwin-arm64":  "@a2d2/claude-monitor-darwin-arm64",
-  "darwin-x64":    "@a2d2/claude-monitor-darwin-x64",
-  "linux-x64":     "@a2d2/claude-monitor-linux-x64",
-  "linux-arm64":   "@a2d2/claude-monitor-linux-arm64",
-  "win32-x64":     "@a2d2/claude-monitor-windows-x64",
+  "darwin-arm64":  "@a2d2/claude-top-darwin-arm64",
+  "darwin-x64":    "@a2d2/claude-top-darwin-x64",
+  "linux-x64":     "@a2d2/claude-top-linux-x64",
+  "linux-arm64":   "@a2d2/claude-top-linux-arm64",
+  "win32-x64":     "@a2d2/claude-top-windows-x64",
 };
 
 // Binary name inside each platform package.
 const BIN_NAME =
-  process.platform === "win32" ? "claude-monitor.exe" : "claude-monitor";
+  process.platform === "win32" ? "claude-top.exe" : "claude-top";
 
 function findBinary() {
   const key = `${process.platform}-${process.arch}`;
@@ -23,7 +23,7 @@ function findBinary() {
 
   if (!pkgName) {
     throw new Error(
-      `@a2d2/claude-monitor: unsupported platform "${key}".\n` +
+      `@a2d2/claude-top: unsupported platform "${key}".\n` +
       `Supported: ${Object.keys(PLATFORM_MAP).join(", ")}`
     );
   }
@@ -35,8 +35,8 @@ function findBinary() {
     return path.join(path.dirname(pkgJson), "bin", BIN_NAME);
   } catch {
     throw new Error(
-      `@a2d2/claude-monitor: could not find platform package "${pkgName}".\n` +
-      `Try reinstalling: npm install -g @a2d2/claude-monitor`
+      `@a2d2/claude-top: could not find platform package "${pkgName}".\n` +
+      `Try reinstalling: npm install -g @a2d2/claude-top`
     );
   }
 }

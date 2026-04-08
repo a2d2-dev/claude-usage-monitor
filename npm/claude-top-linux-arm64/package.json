@@ -1,10 +1,10 @@
 {
-  "name": "@a2d2/claude-monitor-linux-arm64",
+  "name": "@a2d2/claude-top-linux-arm64",
   "version": "0.0.0",
-  "description": "Linux ARM64 binary for @a2d2/claude-monitor",
+  "description": "Linux ARM64 binary for @a2d2/claude-top",
   "os": ["linux"],
   "cpu": ["arm64"],
-  "files": ["bin/claude-monitor"],
+  "files": ["bin/claude-top"],
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -1,10 +1,10 @@
 {
-  "name": "@a2d2/claude-monitor-darwin-arm64",
+  "name": "@a2d2/claude-top-darwin-arm64",
   "version": "0.0.0",
-  "description": "macOS Apple Silicon binary for @a2d2/claude-monitor",
+  "description": "macOS Apple Silicon binary for @a2d2/claude-top",
   "os": ["darwin"],
   "cpu": ["arm64"],
-  "files": ["bin/claude-monitor"],
+  "files": ["bin/claude-top"],
   "license": "MIT",
   "repository": {
     "type": "git",
