@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 # Real IDs are injected by CI via envsubst — never commit actual IDs here.
 [[d1_databases]]
 binding = "DB"
-database_name = "claude-top-db"
+database_name = "a2d2-claude-top"
 database_id = "${CLOUDFLARE_D1_DATABASE_ID}"
 
 # KV namespace for leaderboard cache
