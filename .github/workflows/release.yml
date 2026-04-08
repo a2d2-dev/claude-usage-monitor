@@ -50,10 +50,14 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
+          CLAUDE_TOP_GITHUB_CLIENT_ID: ${{ secrets.CLAUDE_TOP_GITHUB_CLIENT_ID }}
         run: |
           VERSION="${GITHUB_REF_NAME}"
           go build \
-            -ldflags="-s -w -X main.version=${VERSION}" \
+            -ldflags="-s -w \
+              -X main.version=${VERSION} \
+              -X github.com/a2d2-dev/claude-usage-monitor/internal/auth.ClientID=${CLAUDE_TOP_GITHUB_CLIENT_ID} \
+              -X github.com/a2d2-dev/claude-usage-monitor/internal/auth.APIBase=https://claude-top.a2d2.dev" \
             -trimpath \
             -o "npm/${{ matrix.npm_pkg }}/bin/${{ matrix.bin }}" \
             .
