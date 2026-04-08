@@ -115,6 +115,100 @@ leaderboardRoutes.get('/user/:login', async (c) => {
   });
 });
 
+/** Full stats for a single user for a given period. */
+export interface UserStats {
+  github_login: string;
+  avatar_url: string;
+  rank: number;
+  period: string;
+  total_cost_usd: number;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  session_count: number;
+  device_count: number;
+}
+
+/**
+ * queryUserStats fetches aggregated stats for a single github_login from D1.
+ * Returns null if the user has no data for the given period.
+ *
+ * @param db     - D1 database binding
+ * @param login  - GitHub login name
+ * @param period - YYYY-MM period string
+ */
+export async function queryUserStats(
+  db: D1Database,
+  login: string,
+  period: string,
+): Promise<UserStats | null> {
+  const device = await db
+    .prepare(`SELECT github_id, avatar_url FROM devices WHERE github_login = ? LIMIT 1`)
+    .bind(login)
+    .first<{ github_id: number; avatar_url: string }>();
+
+  if (!device) return null;
+
+  const agg = await db
+    .prepare(
+      `SELECT
+         SUM(total_cost_usd)     AS total_cost_usd,
+         SUM(total_tokens)       AS total_tokens,
+         SUM(input_tokens)       AS input_tokens,
+         SUM(output_tokens)      AS output_tokens,
+         SUM(cache_read_tokens)  AS cache_read_tokens,
+         SUM(cache_write_tokens) AS cache_write_tokens,
+         SUM(session_count)      AS session_count,
+         COUNT(*)                AS device_count
+       FROM uploads
+       WHERE github_id = ? AND period = ?`,
+    )
+    .bind(device.github_id, period)
+    .first<{
+      total_cost_usd: number | null;
+      total_tokens: number;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
+      cache_write_tokens: number;
+      session_count: number;
+      device_count: number;
+    }>();
+
+  if (!agg || agg.total_cost_usd === null) return null;
+
+  const rankResult = await db
+    .prepare(
+      `WITH totals AS (
+         SELECT github_id, SUM(total_cost_usd) AS cost
+         FROM uploads WHERE period = ?
+         GROUP BY github_id
+       )
+       SELECT COUNT(*) + 1 AS rank
+       FROM totals
+       WHERE cost > (SELECT cost FROM totals WHERE github_id = ?)`,
+    )
+    .bind(period, device.github_id)
+    .first<{ rank: number }>();
+
+  return {
+    github_login: login,
+    avatar_url: device.avatar_url,
+    rank: rankResult?.rank ?? 1,
+    period,
+    total_cost_usd: agg.total_cost_usd,
+    total_tokens: agg.total_tokens,
+    input_tokens: agg.input_tokens,
+    output_tokens: agg.output_tokens,
+    cache_read_tokens: agg.cache_read_tokens,
+    cache_write_tokens: agg.cache_write_tokens,
+    session_count: agg.session_count,
+    device_count: agg.device_count,
+  };
+}
+
 /**
  * buildLeaderboard queries D1 to produce the TOP 100 leaderboard for a period.
  * Aggregates across all devices per github_id.

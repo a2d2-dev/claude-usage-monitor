@@ -8,7 +8,7 @@
 
 import { Hono } from 'hono';
 import type { Bindings } from '../index';
-import { buildLeaderboard } from './leaderboard';
+import { buildLeaderboard, queryUserStats } from './leaderboard';
 
 export const webRoutes = new Hono<{ Bindings: Bindings }>();
 
@@ -130,27 +130,18 @@ webRoutes.get('/', async (c) => {
 webRoutes.get('/u/:login', async (c) => {
   const login = c.req.param('login');
   const period = currentPeriod();
-  const apiBase = new URL(c.req.url).origin;
 
-  // Fetch user stats from internal API.
-  const apiResp = await fetch(`${apiBase}/api/user/${login}?period=${period}`);
-  if (!apiResp.ok) {
+  // Query DB directly — avoids Cloudflare Workers loopback self-fetch issues.
+  const user = await queryUserStats(c.env.DB, login, period);
+  if (!user) {
     return c.html('<h1>用户不存在或暂无数据</h1>', 404);
   }
-  const user = await apiResp.json() as {
-    github_login: string;
-    avatar_url: string;
-    rank: number;
-    total_cost_usd: number;
-    total_tokens: number;
-    session_count: number;
-    device_count: number;
-  };
 
+  const origin = new URL(c.req.url).origin;
   const safeLogin = escapeHtml(user.github_login);
   const safeAvatar = escapeHtml(user.avatar_url);
-  const ogImg = `${apiBase}/og/${encodeURIComponent(login)}`;
-  const shareUrl = `${apiBase}/u/${encodeURIComponent(login)}`;
+  const ogImg = `${origin}/og/${encodeURIComponent(login)}`;
+  const shareUrl = `${origin}/u/${encodeURIComponent(login)}`;
 
   const body = `<!DOCTYPE html>
 <html lang="zh">
@@ -204,13 +195,10 @@ webRoutes.get('/u/:login', async (c) => {
 webRoutes.get('/og/:login', async (c) => {
   const login = c.req.param('login');
   const period = currentPeriod();
-  const apiBase = new URL(c.req.url).origin;
 
-  // Fetch user stats.
-  const apiResp = await fetch(`${apiBase}/api/user/${login}?period=${period}`);
-  const user = apiResp.ok
-    ? await apiResp.json() as { rank: number; total_cost_usd: number; total_tokens: number }
-    : { rank: 0, total_cost_usd: 0, total_tokens: 0 };
+  // Query DB directly — avoids Cloudflare Workers loopback self-fetch issues.
+  const stats = await queryUserStats(c.env.DB, login, period);
+  const user = stats ?? { rank: 0, total_cost_usd: 0, total_tokens: 0 };
 
   // Escape login for SVG text content (SVG uses the same HTML entities).
   const safeLogin = escapeHtml(login);
