@@ -307,10 +307,33 @@ func TestParseCodexFile_SessionIDFallback(t *testing.T) {
 	}
 }
 
-// TestParseCodexFile_CWDFromPath verifies that the CWD field is set to the
-// directory containing the JSONL file.
-func TestParseCodexFile_CWDFromPath(t *testing.T) {
+// TestParseCodexFile_CWDFromSessionMeta verifies that the CWD is read from
+// session_meta.payload.cwd (the user's project directory), not the JSONL file path.
+func TestParseCodexFile_CWDFromSessionMeta(t *testing.T) {
 	f := writeCodexFile(t, []string{
+		`{"timestamp":"2026-04-10T00:00:00Z","type":"session_meta","payload":{"id":"sess-cwd","cwd":"/Users/user/myproject"}}`,
+		`{"timestamp":"2026-04-10T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}}}`,
+	})
+
+	entries, err := parseCodexFile(f)
+	if err != nil {
+		t.Fatalf("parseCodexFile error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	// CWD should be the project dir from session_meta, not the sessions storage dir.
+	if entries[0].CWD != "/Users/user/myproject" {
+		t.Errorf("CWD: want '/Users/user/myproject', got %q", entries[0].CWD)
+	}
+}
+
+// TestParseCodexFile_CWDFallbackToFilePath verifies that when no session_meta CWD
+// is present, the JSONL file's parent directory is used as the fallback.
+func TestParseCodexFile_CWDFallbackToFilePath(t *testing.T) {
+	f := writeCodexFile(t, []string{
+		// No session_meta, no CWD info
 		`{"timestamp":"2026-04-10T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}}}`,
 	})
 
@@ -324,7 +347,7 @@ func TestParseCodexFile_CWDFromPath(t *testing.T) {
 
 	want := filepath.Dir(f)
 	if entries[0].CWD != want {
-		t.Errorf("CWD: want %q, got %q", want, entries[0].CWD)
+		t.Errorf("CWD fallback: want %q, got %q", want, entries[0].CWD)
 	}
 }
 

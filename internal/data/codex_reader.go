@@ -27,6 +27,8 @@ type codexEvent struct {
 type codexSessionMeta struct {
 	// ID is the unique session identifier.
 	ID string `json:"id"`
+	// CWD is the working directory where Codex was launched.
+	CWD string `json:"cwd"`
 }
 
 // codexTurnContext is the payload for "turn_context" events.
@@ -71,6 +73,8 @@ type codexParseState struct {
 	currentModel string
 	// currentSession is the session ID from the most recent session_meta event.
 	currentSession string
+	// currentCWD is the working directory from session_meta (where Codex was launched).
+	currentCWD string
 	// currentPrompt is the user prompt from the most recent user_message event (truncated).
 	currentPrompt string
 	// lastTokenUsage is the previous token_count snapshot for streaming dedup.
@@ -124,8 +128,13 @@ func processCodexEvent(evt codexEvent, state *codexParseState, filePath string) 
 	switch evt.Type {
 	case "session_meta":
 		var meta codexSessionMeta
-		if err := json.Unmarshal(evt.Payload, &meta); err == nil && meta.ID != "" {
-			state.currentSession = meta.ID
+		if err := json.Unmarshal(evt.Payload, &meta); err == nil {
+			if meta.ID != "" {
+				state.currentSession = meta.ID
+			}
+			if meta.CWD != "" {
+				state.currentCWD = meta.CWD
+			}
 		}
 
 	case "turn_context":
@@ -191,6 +200,12 @@ func processTokenCount(infoRaw json.RawMessage, timestamp string, state *codexPa
 		sessionID = filepath.Base(filePath)
 	}
 
+	// Use the launch directory from session_meta; fall back to the JSONL file's parent dir.
+	cwd := state.currentCWD
+	if cwd == "" {
+		cwd = filepath.Dir(filePath)
+	}
+
 	entry := UsageEntry{
 		Timestamp:           ts,
 		Model:               state.currentModel,
@@ -200,7 +215,7 @@ func processTokenCount(infoRaw json.RawMessage, timestamp string, state *codexPa
 		CacheReadTokens:     usage.CachedInputTokens,
 		SessionID:           sessionID,
 		MessageID:           buildCodexMessageID(sessionID, ts),
-		CWD:                 filepath.Dir(filePath),
+		CWD:                 cwd,
 		UserPrompt:          state.currentPrompt,
 		Source:              "codex",
 	}

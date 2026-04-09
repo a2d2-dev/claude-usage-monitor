@@ -60,7 +60,8 @@ func computeEntryCost(e *data.UsageEntry) float64 {
 	return CalculateCost(e.Model, e.InputTokens, e.OutputTokens, e.CacheCreationTokens, e.CacheReadTokens)
 }
 
-// needsNewBlock returns true when entry falls outside current block's time window.
+// needsNewBlock returns true when entry falls outside current block's time window,
+// or when the entry comes from a different source tool (Claude vs Codex).
 func needsNewBlock(block *data.SessionBlock, entry *data.UsageEntry) bool {
 	if entry.Timestamp.After(block.EndTime) || entry.Timestamp.Equal(block.EndTime) {
 		return true
@@ -68,6 +69,10 @@ func needsNewBlock(block *data.SessionBlock, entry *data.UsageEntry) bool {
 	if len(block.Entries) > 0 {
 		last := block.Entries[len(block.Entries)-1]
 		if entry.Timestamp.Sub(last.Timestamp) >= sessionDuration {
+			return true
+		}
+		// Different source tools (claude vs codex) never share a block.
+		if last.Source != entry.Source {
 			return true
 		}
 	}
@@ -78,8 +83,13 @@ func needsNewBlock(block *data.SessionBlock, entry *data.UsageEntry) bool {
 func newBlock(entry *data.UsageEntry) *data.SessionBlock {
 	start := roundToHour(entry.Timestamp)
 	end := start.Add(sessionDuration)
+	// Include source in ID so same-hour blocks from different tools are distinct.
+	id := start.Format(time.RFC3339)
+	if entry.Source != "" {
+		id += ":" + entry.Source
+	}
 	return &data.SessionBlock{
-		ID:            start.Format(time.RFC3339),
+		ID:            id,
 		StartTime:     start,
 		EndTime:       end,
 		PerModelStats: make(map[string]*data.ModelStats),

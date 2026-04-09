@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/a2d2-dev/claude-usage-monitor/internal/data"
 )
@@ -75,6 +76,81 @@ func TestBuildSessionBlocks_RealData(t *testing.T) {
 			)
 		}
 	}
+}
+
+// TestBuildSessionBlocks_SourceSplit verifies that Claude and Codex entries in the
+// same time window are placed in separate blocks, never merged together.
+func TestBuildSessionBlocks_SourceSplit(t *testing.T) {
+	base := mustParseTime("2026-04-10T10:00:00Z")
+
+	entries := []data.UsageEntry{
+		// Claude entry at T+0
+		{Timestamp: base, Source: "claude", Model: "claude-sonnet-4-6", InputTokens: 100, OutputTokens: 50, SessionID: "s1", MessageID: "m1"},
+		// Codex entry at T+1m (same hour, different source)
+		{Timestamp: base.Add(time.Minute), Source: "codex", Model: "gpt-5-codex", InputTokens: 200, OutputTokens: 80, SessionID: "s2", MessageID: "m2"},
+		// Claude entry at T+2m
+		{Timestamp: base.Add(2 * time.Minute), Source: "claude", Model: "claude-sonnet-4-6", InputTokens: 150, OutputTokens: 60, SessionID: "s1", MessageID: "m3"},
+	}
+
+	blocks := BuildSessionBlocks(entries)
+
+	// Must produce at least 2 blocks (one claude, one codex).
+	if len(blocks) < 2 {
+		t.Fatalf("expected ≥2 blocks (one per source), got %d", len(blocks))
+	}
+
+	// Collect non-gap blocks.
+	var nonGap []data.SessionBlock
+	for _, b := range blocks {
+		if !b.IsGap {
+			nonGap = append(nonGap, b)
+		}
+	}
+	if len(nonGap) < 2 {
+		t.Fatalf("expected ≥2 non-gap blocks, got %d", len(nonGap))
+	}
+
+	// Each non-gap block must have a single Source.
+	for _, b := range nonGap {
+		for _, e := range b.Entries {
+			if e.Source != b.Source {
+				t.Errorf("block source=%q contains entry with source=%q", b.Source, e.Source)
+			}
+		}
+	}
+}
+
+// TestBuildSessionBlocks_SourceTag verifies that the Source field is correctly
+// set to "codex" or "claude" on the resulting blocks.
+func TestBuildSessionBlocks_SourceTag(t *testing.T) {
+	base := mustParseTime("2026-04-10T10:00:00Z")
+
+	entries := []data.UsageEntry{
+		{Timestamp: base, Source: "codex", Model: "gpt-5-codex", InputTokens: 100, OutputTokens: 50, SessionID: "s1", MessageID: "m1"},
+		{Timestamp: base.Add(time.Minute), Source: "codex", Model: "gpt-5-codex", InputTokens: 120, OutputTokens: 60, SessionID: "s1", MessageID: "m2"},
+	}
+
+	blocks := BuildSessionBlocks(entries)
+	var nonGap []data.SessionBlock
+	for _, b := range blocks {
+		if !b.IsGap {
+			nonGap = append(nonGap, b)
+		}
+	}
+	if len(nonGap) != 1 {
+		t.Fatalf("expected 1 non-gap block, got %d", len(nonGap))
+	}
+	if nonGap[0].Source != "codex" {
+		t.Errorf("block Source: want 'codex', got %q", nonGap[0].Source)
+	}
+}
+
+func mustParseTime(s string) time.Time {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
 func TestNormalizeModel(t *testing.T) {
