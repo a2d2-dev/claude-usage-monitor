@@ -183,7 +183,9 @@ export const Layout = ({ title, ogMeta, navRight, children }: LayoutProps) => (
       </nav>
       {children}
       <footer>
-        claude-top · 数据由用户自愿上传 · 仅含聚合统计 ·{' '}
+        claude-top ·{' '}
+        <span data-lang="en">Data uploaded voluntarily · Aggregated stats only ·{' '}</span>
+        <span data-lang="zh">数据由用户自愿上传 · 仅含聚合统计 ·{' '}</span>
         <a href="https://github.com/a2d2-dev/claude-top" target="_blank" rel="noopener">
           GitHub
         </a>
