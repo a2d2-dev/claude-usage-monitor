@@ -5,6 +5,10 @@ lastStep: 11
 project_name: 'claude-top'
 user_name: 'Neov'
 date: '2026-04-08'
+lastRevised: '2026-04-10'
+revisions:
+  - date: '2026-04-10'
+    summary: '新增 Epic 3：Codex CLI 多源支持 + 双排行榜'
 ---
 
 # 产品需求文档 — claude-top
@@ -16,14 +20,16 @@ date: '2026-04-08'
 
 ## 执行摘要
 
-**claude-top** 是一款开源终端 UI（TUI）工具，直接读取本地 JSONL 日志，实时监控 Claude API / Claude Code 的 token 用量和费用。面向重度使用 Claude 的开发者，帮助他们清晰了解各 session 的消费情况。
+**claude-top** 是一款开源终端 UI（TUI）工具，直接读取本地 JSONL 日志，实时监控 AI 编码工具（Claude Code、Codex CLI）的 token 用量和费用。面向重度使用 AI 的开发者，帮助他们清晰了解各 session 的消费情况，不被工具边界割裂视图。
 
-新增的**社交排行榜**功能为工具引入社区维度：用户通过 GitHub 认证后，可上传匿名化的月度用量数据，查看全球排名，并分享统计卡片——将一款单机效率工具转变为开发者社区的流量入口。排行榜是后续 token 转卖业务的核心用户获取漏斗。
+新增的**社交排行榜**功能为工具引入社区维度：用户通过 GitHub 认证后，可上传匿名化的月度用量数据，在各工具的独立榜单中查看全球排名，并分享统计卡片——将一款单机效率工具转变为开发者社区的流量入口。
 
 ### 核心差异点
 
-- **零配置、本地优先**：直接读取 `~/.claude/projects/`，无需 API Key 或注册即可使用核心功能
+- **零配置、本地优先**：直接读取本地 JSONL 日志，无需 API Key 或注册即可使用核心功能
+- **多工具统一视图**：同时支持 Claude Code（`~/.claude/projects/`）和 Codex CLI（`~/.codex/sessions/`），一个工具掌握全部 AI 支出
 - **多设备聚合**：同一 GitHub 身份跨多台机器，月度用量自动汇总
+- **独立排行榜**：Claude Code 和 Codex CLI 用户各玩各的排行榜，公平竞争
 - **病毒式统计卡片**：可分享的 URL / 图片驱动开发者圈有机传播
 - **商业漏斗清晰**：排行榜天然筛选出高消费用户，是 token 转卖的精准目标客群
 
@@ -289,3 +295,144 @@ claude-top                    # 启动 TUI（现有功能）
 - Cloudflare D1（SQLite）：主数据存储
 - Cloudflare KV：排行榜缓存层
 - Web OG 图：通过 Cloudflare Worker 服务端生成（Satori 或同类方案）
+
+---
+
+## Epic 3：Codex CLI 多源支持与双排行榜
+
+> **修订日期：** 2026-04-10
+> **背景：** claude-top 的核心价值是「你花了多少钱用 AI」，而不局限于 Claude Code。OpenAI Codex CLI 是另一个重度命令行 AI 工具，同样在本地产生 JSONL 日志。将两者统一在一个工具里，符合 A2D2 / BMAD 开源精神——让开发者对自己的 AI 支出有完整视图，而非被工具边界人为割裂。
+> **用户诉求：** 同时使用 Claude Code 和 Codex CLI 的开发者，希望在一个地方看到所有 AI 消费，并在社区排行榜中与"同类"竞争。
+
+---
+
+### 3.1 TUI 多源数据接入
+
+#### 功能需求
+
+- **FR-C01**：TUI 读取 `~/.codex/sessions/YYYY/MM/DD/*.jsonl` 中的 Codex CLI 会话数据
+- **FR-C02**：支持 `--source` 启动参数（`all`（默认）/ `claude` / `codex`），控制加载的数据来源
+- **FR-C03**：支持 `--codex-path` 参数覆盖 Codex 数据默认路径
+- **FR-C04**：`~/.codex/sessions` 不存在时静默忽略，不报错，核心功能不受影响
+- **FR-C05**：Codex 数据与 Claude 数据使用相同的 mod-time 文件级缓存机制，避免重复解析
+
+#### Token 字段映射
+
+| Codex 字段 | TUI 内部字段 |
+|---|---|
+| `input_tokens` | `InputTokens` |
+| `cached_input_tokens` | `CacheReadTokens` |
+| `output_tokens` + `reasoning_output_tokens` | `OutputTokens` |
+| （不适用） | `CacheCreationTokens` = 0 |
+
+---
+
+### 3.0 TUI 配置界面
+
+> 启动参数（`--source`）仅适用于一次性调用；常驻用户需要一个可持久化的配置界面，在 TUI 内直接调整偏好，无需每次重新输入参数。
+
+#### 功能需求
+
+- **FR-C00a**：TUI 新增 **Settings 面板**，通过快捷键（建议 `s`）呼出/关闭，覆盖在当前界面之上（modal 形式）
+- **FR-C00b**：Settings 面板提供「数据来源」选项，三档可选：
+  ```
+  数据来源
+  ● 全部（Claude Code + Codex CLI）  ← 默认
+  ○ 仅 Claude Code
+  ○ 仅 Codex CLI
+  ```
+- **FR-C00c**：配置持久化至本地文件 `~/.claude-top/config.json`，下次启动自动读取，无需重新设置
+- **FR-C00d**：`--source` 命令行参数优先级高于持久化配置（方便脚本/临时覆盖）
+- **FR-C00e**：Settings 面板中可设置 Codex 数据路径（默认 `~/.codex/sessions`），方便非标准安装路径的用户
+
+#### 交互设计
+
+```
+┌─── Settings ──────────────────────────────┐
+│                                           │
+│  数据来源                                  │
+│  ▶ [●] All (Claude Code + Codex CLI)      │
+│    [ ] Claude Code only                   │
+│    [ ] Codex CLI only                     │
+│                                           │
+│  Codex 数据路径                            │
+│  > ~/.codex/sessions                      │
+│                                           │
+│  [Enter] 确认   [Esc] 关闭                │
+└───────────────────────────────────────────┘
+```
+
+- 使用方向键 ↑↓ 切换选项，`Enter` 确认并立即重新加载数据
+- 路径字段支持直接编辑（进入编辑模式后高亮显示）
+- 变更立即生效，无需重启 TUI
+
+---
+
+#### 定价（按百万 token，估算值，随官方定价更新）
+
+| 模型 | Input | Cached Input | Output |
+|---|---|---|---|
+| `codex-mini-latest` | $1.50 | $0.375 | $6.00 |
+| `codex-latest` | $3.00 | $0.750 | $12.00 |
+| 未知 OpenAI 模型 | 同 codex-mini | — | — |
+
+---
+
+### 3.2 TUI 界面调整
+
+#### Sessions 标签页
+
+- **FR-C06**：每行显示来源前缀：`[C]` = Claude Code，`[X]` = Codex CLI
+- **FR-C07**：混合模式（`--source all`）下，按时间倒序统一排列，不分组
+- **FR-C08**：`--source claude` 行为与现有版本完全一致（向后兼容）
+
+#### Overview 标签页
+
+- **FR-C09**：ALL-TIME TOTALS 保留合并总数（现有展示不变）
+- **FR-C10**：合并总数下方新增 per-source 分组行：
+  ```
+  ● Claude Code   Tokens: 982,441   Cost: $2.91   Sessions: 47
+  ✦ Codex CLI     Tokens: 302,460   Cost: $0.91   Sessions: 14
+  ```
+- **FR-C11**：仅当本地同时存在两种数据时才展示分组行；单一来源时不显示
+
+---
+
+### 3.3 双排行榜
+
+#### 用户故事
+
+> 作为 Codex CLI 重度用户，我希望在一个与 Claude Code 用户**分开**的排行榜中竞争，因为两个工具的用量数量级和用户群体不同，混合排名没有意义。
+
+#### 功能需求
+
+- **FR-C12**：排行榜页面顶部新增 **Claude Code / Codex CLI** tab 切换，默认显示 Claude Code 榜
+- **FR-C13**：两个榜单数据完全独立，互不影响
+- **FR-C14**：视觉区分：Claude Code 榜沿用现有配色；Codex CLI 榜采用 OpenAI 绿色系（`#10A37F`）
+- **FR-C15**：上传 API 请求体新增 `source` 字段（`"claude"` / `"codex"`），服务端分表或分 namespace 存储
+- **FR-C16**：`GET /api/leaderboard` 新增必填查询参数 `source`，现有无参调用返回 `claude`（向后兼容）
+- **FR-C17**：个人统计页 `/u/:github_login` 展示该用户**所有来源**的数据（分 section 显示）
+- **FR-C18**：TUI 上传时根据 `--source` 参数自动选择目标榜单；`--source all` 时分别上传两份数据
+
+#### 未来预留（本期不实现）
+
+- **FR-C19**：「总榜」tab（合并所有来源，按总 AI 支出排名）——tab 位置预留，内容标注"即将上线"
+- **FR-C20**：分享卡片的视觉区分（Codex 卡片使用绿色主题）
+
+---
+
+### 3.4 非功能需求补充
+
+- **NFR-C01**：Codex 数据解析不阻塞 TUI 启动；初次加载时进度提示与 Claude 数据一致
+- **NFR-C02**：后端双榜数据隔离，Codex 排行榜的 KV 缓存 key 与 Claude 榜不冲突（namespace 前缀区分）
+- **NFR-C03**：缓存版本号从 v2 升至 v3（`UsageEntry` 新增 `Source` 字段），旧缓存自动失效重建
+
+---
+
+### 3.5 成功标准（Epic 3 专项）
+
+- `--source all` 启动后，Sessions 列表正确显示 `[C]`/`[X]` 前缀
+- `--source codex` 只显示 Codex 数据，`--source claude` 行为与旧版完全一致
+- 排行榜页面 Claude / Codex tab 切换正常，配色明确区分
+- Codex 数据上传成功后，Codex 榜排名正确更新
+- `~/.codex/sessions` 不存在时，工具正常启动，无报错
