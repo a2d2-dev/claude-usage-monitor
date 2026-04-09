@@ -113,7 +113,7 @@ func addEntryToBlock(block *data.SessionBlock, entry *data.UsageEntry) {
 	block.MessageCount++
 }
 
-// finalizeBlock sets the actual end time and primary directory on the block.
+// finalizeBlock sets the actual end time, primary directory, and dominant source on the block.
 func finalizeBlock(block *data.SessionBlock, cwdFreq map[string]int) {
 	if len(block.Entries) > 0 {
 		t := block.Entries[len(block.Entries)-1].Timestamp
@@ -121,6 +121,20 @@ func finalizeBlock(block *data.SessionBlock, cwdFreq map[string]int) {
 	}
 	block.MessageCount = len(block.Entries)
 	block.Directory = modalCWD(cwdFreq)
+	block.Source = dominantSource(block.Entries)
+}
+
+// dominantSource returns "claude" or "codex" based on the majority of entries.
+// Defaults to "claude" on tie or empty slice.
+func dominantSource(entries []data.UsageEntry) string {
+	counts := map[string]int{}
+	for _, e := range entries {
+		counts[e.Source]++
+	}
+	if counts["codex"] > counts["claude"] {
+		return "codex"
+	}
+	return "claude"
 }
 
 // modalCWD returns the most frequently seen working directory from cwdFreq.

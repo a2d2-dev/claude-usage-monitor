@@ -8,7 +8,8 @@ import (
 )
 
 // cacheVersion must be bumped whenever UsageEntry or fileCache change shape.
-const cacheVersion = 2
+// Bumped to 3 after adding Source field to UsageEntry and SessionBlock.
+const cacheVersion = 3
 
 // cacheFilename is the name of the cache file on disk.
 const cacheFilename = "entries.cache"
@@ -36,6 +37,15 @@ func defaultCachePath() string {
 		return ""
 	}
 	return filepath.Join(home, ".cache", "a2d2", "claude-usage-monitor", cacheFilename)
+}
+
+// codexCachePath returns ~/.cache/a2d2/claude-usage-monitor/codex.cache.
+func codexCachePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".cache", "a2d2", "claude-usage-monitor", "codex.cache")
 }
 
 // loadCache reads the cache from disk. Returns an empty store on any error

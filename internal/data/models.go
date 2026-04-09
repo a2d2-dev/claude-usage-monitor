@@ -28,6 +28,8 @@ type UsageEntry struct {
 	// UserPrompt is the text of the user message that triggered this response.
 	// Truncated to 200 chars. Empty if not available.
 	UserPrompt string
+	// Source identifies which tool produced this entry: "claude" or "codex".
+	Source string
 }
 
 // TokenCounts aggregates token usage across multiple entries.
@@ -72,6 +74,8 @@ type SessionBlock struct {
 	// Directory is the primary working directory for this session block.
 	// Computed as the most frequently seen CWD across all entries.
 	Directory string
+	// Source is the dominant data source among this block's entries ("claude" or "codex").
+	Source string
 }
 
 // ModelStats holds per-model token and cost aggregates within a session.

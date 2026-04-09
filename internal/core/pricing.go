@@ -15,6 +15,16 @@ type modelPricing struct {
 	CacheRead float64
 }
 
+// openAIPricing maps normalized OpenAI model names to pricing tiers.
+// Prices per million tokens in USD. Source: OpenAI pricing page (2026).
+// CacheCreation = 0 (OpenAI cache is read-only from Codex CLI perspective).
+var openAIPricing = map[string]modelPricing{
+	// codex-mini-latest
+	"codex-mini": {Input: 1.50, Output: 6.00, CacheCreation: 0, CacheRead: 0.375},
+	// codex-latest (full)
+	"codex": {Input: 3.00, Output: 12.00, CacheCreation: 0, CacheRead: 0.750},
+}
+
 // knownPricing maps normalised model names to their pricing tier.
 // Prices are per million tokens in USD.
 // Source: Anthropic API pricing (2026) — claude-opus-4.6, claude-sonnet-4.6, claude-haiku-4.5.
@@ -55,9 +65,17 @@ func CalculateCost(model string, inputTokens, outputTokens, cacheCreate, cacheRe
 }
 
 // pricingForModel returns the pricing tier for a given model name.
+// Checks OpenAI models first (contains "gpt" or "codex"), then falls through to Anthropic.
 // Falls back to sonnet pricing for unknown models.
 func pricingForModel(model string) modelPricing {
 	lower := strings.ToLower(model)
+	// Check OpenAI models before Anthropic checks.
+	if strings.Contains(lower, "gpt") || strings.Contains(lower, "codex") {
+		if strings.Contains(lower, "mini") {
+			return openAIPricing["codex-mini"]
+		}
+		return openAIPricing["codex"]
+	}
 	if strings.Contains(lower, "opus") {
 		return knownPricing["opus"]
 	}

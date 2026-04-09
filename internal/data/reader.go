@@ -162,6 +162,11 @@ func LoadEntries(dataPath string) ([]UsageEntry, error) {
 		}
 	}
 
+	// Backfill Source="claude" on all entries before returning.
+	for i := range entries {
+		entries[i].Source = "claude"
+	}
+
 	// Sort chronologically.
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Timestamp.Before(entries[j].Timestamp)
@@ -183,10 +188,48 @@ func LoadCached() ([]UsageEntry, error) {
 	for _, fc := range store.Files {
 		mergeEntries(fc.Entries, &entries, seen)
 	}
+	// Backfill Source="claude" for backward-compat with caches written before source field.
+	for i := range entries {
+		if entries[i].Source == "" {
+			entries[i].Source = "claude"
+		}
+	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Timestamp.Before(entries[j].Timestamp)
 	})
 	return entries, nil
+}
+
+// LoadAllEntries merges Claude and Codex entries based on the sources filter,
+// sorted chronologically.
+// sources: "all" | "claude" | "codex"
+// claudePath: defaults to ~/.claude/projects if empty.
+// codexPath:  defaults to ~/.codex/sessions if empty.
+func LoadAllEntries(claudePath, codexPath, sources string) ([]UsageEntry, error) {
+	var all []UsageEntry
+
+	if sources == "all" || sources == "claude" {
+		claudeEntries, err := LoadEntries(claudePath)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, claudeEntries...)
+	}
+
+	if sources == "all" || sources == "codex" {
+		codexEntries, err := LoadCodexEntries(codexPath)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, codexEntries...)
+	}
+
+	// Sort merged results chronologically.
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].Timestamp.Before(all[j].Timestamp)
+	})
+
+	return all, nil
 }
 
 // mergeEntries appends src entries into dst, skipping duplicates tracked by seen.
