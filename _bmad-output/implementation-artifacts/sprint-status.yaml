@@ -30,9 +30,9 @@ development_status:
 
   epic-5: in-progress
   5-1-codex-data-parsing-cache: done
-  5-2-sessions-tab-multi-source: backlog
-  5-3-overview-per-source-stats: backlog
-  5-4-settings-panel: backlog
+  5-2-sessions-tab-multi-source: done
+  5-3-overview-per-source-stats: done
+  5-4-settings-panel: done
   epic-5-retrospective: optional
 
   epic-6: backlog
