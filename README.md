@@ -2,8 +2,6 @@
 
 Terminal UI for monitoring [Claude Code](https://claude.ai/code) token and cost usage in real time.
 
-![claude-top screenshot](https://github.com/a2d2-dev/claude-top/releases/download/v0.1.1/screenshot.png)
-
 ## Screenshots
 
 ![Overview](backend/src/assert/screenshot-1.png)
