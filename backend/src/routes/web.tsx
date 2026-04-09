@@ -45,8 +45,13 @@ function escapeHtml(str: string): string {
 webRoutes.get('/', async (c) => {
   const period = c.req.query('period') ?? currentPeriod();
   const rows = await buildLeaderboard(c.env.DB, period);
-  // html 模板注入 DOCTYPE，JSX 组件作为 HtmlEscapedString 插值（不会被二次转义）。
-  return c.html(html`<!DOCTYPE html>${(<LeaderboardPage rows={rows} period={period} />)}`);
+  return c.html(html`<!DOCTYPE html>${(<LeaderboardPage rows={rows} period={period} defaultTab="about" />)}`);
+});
+
+webRoutes.get('/leaderboard', async (c) => {
+  const period = c.req.query('period') ?? currentPeriod();
+  const rows = await buildLeaderboard(c.env.DB, period);
+  return c.html(html`<!DOCTYPE html>${(<LeaderboardPage rows={rows} period={period} defaultTab="leaderboard" />)}`);
 });
 
 // ── 用户统计页 ────────────────────────────────────────────────

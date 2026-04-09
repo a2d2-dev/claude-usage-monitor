@@ -21,6 +21,8 @@ export interface LeaderboardRow {
 interface LeaderboardPageProps {
   rows: LeaderboardRow[];
   period: string;
+  /** 默认激活的 tab，'about' 或 'leaderboard'，默认 'about' */
+  defaultTab?: 'about' | 'leaderboard';
 }
 
 // ── 功能特性（双语） ──────────────────────────────────────────
@@ -592,10 +594,10 @@ const pageScript = `
     var lbtn = document.getElementById('lang-btn');
     if (lbtn) lbtn.textContent = lang === 'zh' ? 'EN' : '中文';
 
-    // 页面 Tab
+    // 页面 Tab：hash 优先，否则使用服务端注入的默认值
     var hash      = location.hash.replace('#', '');
     var validTabs = ['leaderboard', 'about'];
-    var tab = validTabs.indexOf(hash) !== -1 ? hash : 'leaderboard';
+    var tab = validTabs.indexOf(hash) !== -1 ? hash : __DEFAULT_TAB__;
     showTab(tab);
 
     // 终端轮播：先显示 overview，3.5 秒一循环
@@ -904,7 +906,7 @@ const TableRow = ({ row }: { row: LeaderboardRow }) => {
  * @param rows   - 排行榜数据行
  * @param period - 当前周期（YYYY-MM）
  */
-export const LeaderboardPage = ({ rows, period }: LeaderboardPageProps) => (
+export const LeaderboardPage = ({ rows, period, defaultTab = 'about' }: LeaderboardPageProps) => (
   <Layout
     title="claude-top · Claude API Usage Leaderboard"
     ogMeta={
@@ -926,7 +928,7 @@ export const LeaderboardPage = ({ rows, period }: LeaderboardPageProps) => (
     }
   >
     <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
-    <script dangerouslySetInnerHTML={{ __html: pageScript }} />
+    <script dangerouslySetInnerHTML={{ __html: pageScript.replace('__DEFAULT_TAB__', JSON.stringify(defaultTab)) }} />
 
     {/* ── Tab 导航栏 ── */}
     <div class="page-tabs">
