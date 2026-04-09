@@ -2,7 +2,13 @@
 
 Terminal UI for monitoring [Claude Code](https://claude.ai/code) token and cost usage in real time.
 
-![claude-monitor screenshot](https://github.com/a2d2-dev/claude-usage-monitor/releases/download/v0.1.1/screenshot.png)
+![claude-monitor screenshot](https://github.com/a2d2-dev/claude-top/releases/download/v0.1.1/screenshot.png)
+
+## Screenshots
+
+![Overview](backend/src/assert/screenshot-1.png)
+![Sessions](backend/src/assert/screenshot-2.png)
+![Daily](backend/src/assert/screenshot-3.png)
 
 ## Features
 
@@ -30,12 +36,12 @@ claude-monitor
 ### go install
 
 ```bash
-go install github.com/a2d2-dev/claude-usage-monitor@latest
+go install github.com/a2d2-dev/claude-top@latest
 ```
 
 ### Download binary
 
-Grab the binary for your platform from the [Releases page](https://github.com/a2d2-dev/claude-usage-monitor/releases/latest):
+Grab the binary for your platform from the [Releases page](https://github.com/a2d2-dev/claude-top/releases/latest):
 
 | Platform | File |
 |----------|------|
