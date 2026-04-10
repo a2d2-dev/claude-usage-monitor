@@ -12,7 +12,8 @@ import (
 // v3: added Source field to UsageEntry and SessionBlock
 // v4: fixed Codex CWD to use session_meta.payload.cwd instead of file path
 // v5: fixed Codex InputTokens to subtract CacheReadTokens (avoid double billing)
-const cacheVersion = 5
+// v6: fixed Codex streaming dedup — only emit final token_count per turn
+const cacheVersion = 6
 
 // cacheFilename is the name of the cache file on disk.
 const cacheFilename = "entries.cache"
