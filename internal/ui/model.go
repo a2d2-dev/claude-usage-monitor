@@ -164,18 +164,25 @@ type loadedMsg struct {
 	fromCache bool // true = preliminary data from gob cache; full refresh still pending
 }
 
+// msgDetailLoadedMsg is sent when on-demand message detail loading completes.
+type msgDetailLoadedMsg struct {
+	detail *data.MessageDetail
+}
+
 // ── Per-tab state ─────────────────────────────────────────────────────────────
 
 // sessionsState holds all UI state for the Sessions tab.
 type sessionsState struct {
-	cursor          int
-	sortColumn      sortCol
-	sortAsc         bool
-	view            viewMode
-	detailMsgCursor int           // selected message index in detail view
-	detailSort      detailSortCol // sort column for message table in detail view
-	detailSortAsc   bool          // sort direction for message table
-	copyFeedback    string        // set briefly after clipboard copy ("Copied!" or "Copy failed")
+	cursor           int
+	sortColumn       sortCol
+	sortAsc          bool
+	view             viewMode
+	detailMsgCursor  int           // selected message index in detail view
+	detailSort       detailSortCol // sort column for message table in detail view
+	detailSortAsc    bool          // sort direction for message table
+	copyFeedback     string        // set briefly after clipboard copy ("Copied!" or "Copy failed")
+	msgDetail        *data.MessageDetail // loaded on-demand when entering viewMsgDetail
+	msgDetailLoading bool          // true while async detail load is in flight
 }
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -288,6 +295,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case uploadResultMsg:
 		return m.handleUploadResult(msg)
+
+	case msgDetailLoadedMsg:
+		m.sessions.msgDetail = msg.detail
+		m.sessions.msgDetailLoading = false
+		m.sessions.view = viewMsgDetail
+		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKey(msg.String())
@@ -436,8 +449,11 @@ func (m Model) handleSessionsKey(key string) (tea.Model, tea.Cmd) {
 			m.sessions.detailMsgCursor = 0
 		case "enter":
 			if msgCount > 0 {
-				m.sessions.view = viewMsgDetail
+				entry := msgs[m.sessions.detailMsgCursor]
+				m.sessions.msgDetail = nil
+				m.sessions.msgDetailLoading = true
 				m.sessions.copyFeedback = ""
+				return m, loadMsgDetail(m.dataPath, entry)
 			}
 		}
 		return m, nil
@@ -676,6 +692,29 @@ func loadCached(source string) tea.Cmd {
 
 // loadData reads all JSONL files (full refresh with cache validation).
 // dataPath is the Claude projects dir; codexPath is the Codex sessions dir.
+// loadMsgDetail returns a command that reads the full message content from disk.
+// It finds the JSONL source file via sessionID and extracts the assistant turn.
+func loadMsgDetail(dataPath string, entry data.UsageEntry) tea.Cmd {
+	return func() tea.Msg {
+		if entry.Source == "codex" {
+			return msgDetailLoadedMsg{detail: &data.MessageDetail{
+				LoadErr: fmt.Errorf("full message content is not yet available for Codex sessions"),
+			}}
+		}
+		sourceFile := data.FindClaudeSessionFile(dataPath, entry.SessionID)
+		if sourceFile == "" {
+			return msgDetailLoadedMsg{detail: &data.MessageDetail{
+				LoadErr: fmt.Errorf("session file not found (id: %s)", entry.SessionID),
+			}}
+		}
+		detail, err := data.ReadMessageDetail(sourceFile, entry.MessageID)
+		if err != nil {
+			return msgDetailLoadedMsg{detail: &data.MessageDetail{LoadErr: err}}
+		}
+		return msgDetailLoadedMsg{detail: detail}
+	}
+}
+
 // source: "all" | "claude" | "codex".
 func loadData(dataPath, codexPath, source string) tea.Cmd {
 	return func() tea.Msg {

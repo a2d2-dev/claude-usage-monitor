@@ -426,9 +426,10 @@ func renderMsgRow(e data.UsageEntry, sessionCost float64, promptW int, isCursor 
 	}, " ")
 }
 
-// renderMsgDetailContent renders the full token breakdown and prompt for one message.
+// renderMsgDetailContent renders the full token breakdown and message content for one entry.
+// detail is the on-demand loaded content (nil while loading or on error).
 // contentH is the available height (lines) inside the box excluding the title row.
-func renderMsgDetailContent(e data.UsageEntry, sessionCost float64, innerW, contentH int) string {
+func renderMsgDetailContent(e data.UsageEntry, sessionCost float64, detail *data.MessageDetail, loading bool, innerW, contentH int) string {
 	total := e.InputTokens + e.OutputTokens + e.CacheCreationTokens + e.CacheReadTokens
 	pct := func(n int) float64 {
 		if total == 0 {
@@ -483,23 +484,104 @@ func renderMsgDetailContent(e data.UsageEntry, sessionCost float64, innerW, cont
 			labelStyle.Render("Total  "), valueStyle.Render(formatInt(total))),
 	}
 
-	if e.UserPrompt != "" {
-		lines = append(lines, "", sectionTitleStyle.Render("  PROMPT"))
-		promptW := innerW - 4
-		if promptW < 10 {
-			promptW = 10
+	textW := innerW - 4
+	if textW < 10 {
+		textW = 10
+	}
+
+	// ── On-demand message content ────────────────────────────────────────────
+	switch {
+	case loading:
+		lines = append(lines, "", mutedStyle.Render("  Loading message content…"))
+
+	case detail != nil && detail.LoadErr != nil:
+		lines = append(lines, "", mutedStyle.Render("  "+detail.LoadErr.Error()))
+
+	case detail != nil:
+		// User message text.
+		if detail.UserText != "" {
+			lines = append(lines, "", sectionTitleStyle.Render("  USER MESSAGE"))
+			lines = append(lines, wrapText(detail.UserText, textW, "  ")...)
 		}
-		for _, rawLine := range strings.Split(e.UserPrompt, "\n") {
-			runes := []rune(rawLine)
-			for len(runes) > promptW {
-				lines = append(lines, "  "+string(runes[:promptW]))
-				runes = runes[promptW:]
+
+		// Tool results from previous assistant turn.
+		if len(detail.ToolResults) > 0 {
+			label := fmt.Sprintf("  TOOL RESULTS  (%d)", len(detail.ToolResults))
+			lines = append(lines, "", sectionTitleStyle.Render(label))
+			for _, tr := range detail.ToolResults {
+				errTag := ""
+				if tr.IsError {
+					errTag = lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Render(" [error]")
+				}
+				lines = append(lines, fmt.Sprintf("  %s %s%s",
+					mutedStyle.Render("tool_use_id:"),
+					valueStyle.Render(tr.ToolUseID),
+					errTag,
+				))
+				lines = append(lines, wrapText(tr.Content, textW, "  ")...)
+				lines = append(lines, "")
 			}
-			lines = append(lines, "  "+string(runes))
+		}
+
+		// Assistant response text.
+		if detail.AssistantText != "" {
+			lines = append(lines, "", sectionTitleStyle.Render("  ASSISTANT RESPONSE"))
+			lines = append(lines, wrapText(detail.AssistantText, textW, "  ")...)
+		}
+
+		// Extended thinking (if present).
+		if detail.ThinkingText != "" {
+			lines = append(lines, "", sectionTitleStyle.Render("  THINKING"))
+			lines = append(lines, wrapText(detail.ThinkingText, textW, "  ")...)
+		}
+
+		// Tool calls made by the assistant.
+		if len(detail.ToolCalls) > 0 {
+			label := fmt.Sprintf("  TOOL CALLS  (%d)", len(detail.ToolCalls))
+			lines = append(lines, "", sectionTitleStyle.Render(label))
+			for _, tc := range detail.ToolCalls {
+				lines = append(lines, fmt.Sprintf("  %s  %s  %s",
+					lipgloss.NewStyle().Foreground(lipgloss.Color("#FBBF24")).Bold(true).Render("●"),
+					valueStyle.Render(tc.Name),
+					mutedStyle.Render(tc.ID),
+				))
+				if tc.Input != "" && tc.Input != "    null" && tc.Input != "    {}" {
+					lines = append(lines, wrapText(tc.Input, textW, "  ")...)
+				}
+				lines = append(lines, "")
+			}
+		}
+
+	default:
+		// detail is nil and not loading — fall back to the truncated prompt from cache.
+		if e.UserPrompt != "" {
+			lines = append(lines, "", sectionTitleStyle.Render("  PROMPT"))
+			lines = append(lines, wrapText(e.UserPrompt, textW, "  ")...)
 		}
 	}
 
 	return padToHeight(strings.Join(lines, "\n"), contentH)
+}
+
+// wrapText word-wraps text at width, prefixing each line with indent.
+func wrapText(text string, width int, indent string) []string {
+	if width < 4 {
+		width = 4
+	}
+	var result []string
+	for _, paragraph := range strings.Split(text, "\n") {
+		runes := []rune(paragraph)
+		if len(runes) == 0 {
+			result = append(result, "")
+			continue
+		}
+		for len(runes) > width {
+			result = append(result, indent+string(runes[:width]))
+			runes = runes[width:]
+		}
+		result = append(result, indent+string(runes))
+	}
+	return result
 }
 
 // sessionUpdatedAt returns the effective end time of a session block.
@@ -655,7 +737,7 @@ func renderDetailPanel(m Model, s *data.SessionBlock, height int) string {
 		}
 		detailTitle := "  " + sectionTitleStyle.Render("Message Detail") + progress + "\n"
 		detailBox := activeCardStyle.Width(boxW).Height(bottomContentH).Render(
-			detailTitle + renderMsgDetailContent(selected, s.CostUSD, innerW, bottomContentH-1),
+			detailTitle + renderMsgDetailContent(selected, s.CostUSD, m.sessions.msgDetail, m.sessions.msgDetailLoading, innerW, bottomContentH-1),
 		)
 
 		var hint string
