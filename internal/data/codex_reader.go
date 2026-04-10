@@ -206,10 +206,19 @@ func processTokenCount(infoRaw json.RawMessage, timestamp string, state *codexPa
 		cwd = filepath.Dir(filePath)
 	}
 
+	// OpenAI's input_tokens INCLUDES cached tokens, unlike Anthropic where
+	// input_tokens excludes cache_read. Subtract cached portion so downstream
+	// cost calculation charges non-cached input at full price and cached input
+	// at the lower cache-read price (matching OpenAI billing semantics).
+	nonCachedInput := usage.InputTokens - usage.CachedInputTokens
+	if nonCachedInput < 0 {
+		nonCachedInput = 0
+	}
+
 	entry := UsageEntry{
 		Timestamp:           ts,
 		Model:               state.currentModel,
-		InputTokens:         usage.InputTokens,
+		InputTokens:         nonCachedInput,
 		OutputTokens:        usage.OutputTokens + usage.ReasoningOutputTokens,
 		CacheCreationTokens: 0,
 		CacheReadTokens:     usage.CachedInputTokens,

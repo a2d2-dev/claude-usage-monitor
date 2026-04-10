@@ -149,9 +149,10 @@ func TestParseCodexFile_TokenDedup(t *testing.T) {
 	}
 
 	// Verify second entry tokens (output = 80 + 5 reasoning = 85).
+	// OpenAI input_tokens includes cached, so non-cached = 200 - 10 = 190.
 	e1 := entries[1]
-	if e1.InputTokens != 200 {
-		t.Errorf("entry[1] InputTokens: want 200, got %d", e1.InputTokens)
+	if e1.InputTokens != 190 {
+		t.Errorf("entry[1] InputTokens: want 190 (200-10 cached), got %d", e1.InputTokens)
 	}
 	if e1.OutputTokens != 85 {
 		t.Errorf("entry[1] OutputTokens: want 85 (80+5 reasoning), got %d", e1.OutputTokens)
