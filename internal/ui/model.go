@@ -191,6 +191,10 @@ type sessionsState struct {
 	copyFeedback     string        // set briefly after clipboard copy ("Copied!" or "Copy failed")
 	msgDetail        *data.MessageDetail // loaded on-demand when entering viewMsgDetail
 	msgDetailLoading bool          // true while async detail load is in flight
+
+	// Source filter toggles. Both default true (show all sources).
+	showClaude bool
+	showCodex  bool
 }
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -245,7 +249,7 @@ func NewModel(planName, dataPath, source, codexPath string) Model {
 		width:     120,
 		height:    40,
 		tab:       tabOverview,
-		sessions:  sessionsState{sortColumn: sortByStart, sortAsc: false},
+		sessions:  sessionsState{sortColumn: sortByStart, sortAsc: false, showClaude: true, showCodex: true},
 	}
 }
 
@@ -505,6 +509,25 @@ func (m Model) handleSessionsKey(key string) (tea.Model, tea.Cmd) {
 	case "/":
 		m.sessions.sortAsc = !m.sessions.sortAsc
 		m.sessions.cursor = 0
+	case "1", "c":
+		// Toggle Claude source filter (only meaningful in "all" mode).
+		if m.source != "codex" {
+			// Don't allow turning off both filters at once.
+			if m.sessions.showClaude && !m.sessions.showCodex {
+				break
+			}
+			m.sessions.showClaude = !m.sessions.showClaude
+			m.sessions.cursor = 0
+		}
+	case "2", "x":
+		// Toggle Codex source filter (only meaningful in "all" mode).
+		if m.source != "claude" {
+			if !m.sessions.showClaude && m.sessions.showCodex {
+				break
+			}
+			m.sessions.showCodex = !m.sessions.showCodex
+			m.sessions.cursor = 0
+		}
 	case "enter":
 		if len(rows) > 0 && m.sessions.cursor < len(rows) {
 			m.sessions.view = viewDetail
@@ -576,9 +599,18 @@ func (m Model) handleDailyKey(key string) (tea.Model, tea.Cmd) {
 func (m Model) sessionRows() []data.SessionBlock {
 	var rows []data.SessionBlock
 	for i := range m.blocks {
-		if !m.blocks[i].IsGap && !m.blocks[i].IsActive {
-			rows = append(rows, m.blocks[i])
+		b := m.blocks[i]
+		if b.IsGap || b.IsActive {
+			continue
 		}
+		// Apply source filter toggles.
+		if b.Source == "claude" && !m.sessions.showClaude {
+			continue
+		}
+		if b.Source == "codex" && !m.sessions.showCodex {
+			continue
+		}
+		rows = append(rows, b)
 	}
 	sortSessionRows(rows, m.sessions.sortColumn, m.sessions.sortAsc)
 	return rows

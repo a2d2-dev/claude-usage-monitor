@@ -53,8 +53,19 @@ func renderSessions(m Model, height int) string {
 	header := headerIndent + strings.Join(headerCols, " ")
 	divider := mutedStyle.Render(strings.Repeat("─", min(innerW, m.width-6)))
 
+	// ── Source filter bar ─────────────────────────────────────────────────────
+	// Only shown when the loaded source is "all" (both sources present).
+	var filterBar string
+	if m.source != "claude" && m.source != "codex" {
+		filterBar = renderSourceFilterBar(m)
+	}
+
 	// ── Visible rows ──────────────────────────────────────────────────────────
-	visibleRows := height - 5 // 2 border + title + header + divider
+	extraLines := 0
+	if filterBar != "" {
+		extraLines = 1
+	}
+	visibleRows := height - 5 - extraLines // 2 border + title + header + divider
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
@@ -78,9 +89,11 @@ func renderSessions(m Model, height int) string {
 
 	lines := []string{
 		sectionTitleStyle.Render("  SESSIONS") + progressInfo,
-		header,
-		divider,
 	}
+	if filterBar != "" {
+		lines = append(lines, filterBar)
+	}
+	lines = append(lines, header, divider)
 
 	for i, s := range visible {
 		rowIdx := scroll + i
@@ -90,4 +103,33 @@ func renderSessions(m Model, height int) string {
 
 	content := padToHeight(strings.Join(lines, "\n"), height-2)
 	return cardStyle.Width(m.width - 2).Height(height - 2).Render(content)
+}
+
+// renderSourceFilterBar renders the source filter toggles shown above the sessions table.
+// Example:  Filter:  [✓] 🤖 Claude Code (c)   [✓] ✦ Codex CLI (x)
+func renderSourceFilterBar(m Model) string {
+	claudeCheck := "✓"
+	codexCheck := "✓"
+	if !m.sessions.showClaude {
+		claudeCheck = " "
+	}
+	if !m.sessions.showCodex {
+		codexCheck = " "
+	}
+
+	claudeStyle := mutedStyle
+	codexStyle := mutedStyle
+	if m.sessions.showClaude {
+		claudeStyle = labelStyle
+	}
+	if m.sessions.showCodex {
+		codexStyle = labelStyle
+	}
+
+	prefix := mutedStyle.Render("  Filter: ")
+	claudeBtn := claudeStyle.Render(fmt.Sprintf("[%s] 🤖 Claude Code", claudeCheck))
+	codexBtn := codexStyle.Render(fmt.Sprintf("[%s] ✦ Codex CLI", codexCheck))
+	hint := mutedStyle.Render("  (c / x to toggle)")
+
+	return prefix + claudeBtn + "   " + codexBtn + hint
 }
