@@ -9,7 +9,7 @@ import (
 
 // renderSessions renders the Sessions tab: scrollable history table or detail view.
 func renderSessions(m Model, height int) string {
-	if m.sessions.view == viewDetail {
+	if m.sessions.view == viewDetail || m.sessions.view == viewMsgDetail {
 		sel := m.selectedSession()
 		if sel != nil {
 			return renderDetailPanel(m, sel, height)
