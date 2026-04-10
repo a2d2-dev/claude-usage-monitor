@@ -40,14 +40,17 @@ type UploadPayload struct {
 	ModelBreakdown map[string]*ModelMonthlyStats `json:"model_breakdown"`
 }
 
-// UploadResponse is the JSON response from POST /api/upload.
+// UploadResponse is the JSON response from POST /api/upload or /api/v2/upload.
 type UploadResponse struct {
-	// Rank is the user's current global rank for the period.
+	// Rank is the user's current global rank for the period and source.
 	Rank int `json:"rank"`
-	// TotalUsers is the total number of users with data for the period.
+	// TotalUsers is the total number of users with data for the period and source.
 	TotalUsers int `json:"total_users"`
 	// ShareURL is the permanent shareable URL for the user's stats page.
 	ShareURL string `json:"share_url"`
+	// Source identifies which leaderboard this rank is for ("claude" or "codex").
+	// Always present in v2; present in v1 as of this release.
+	Source string `json:"source"`
 }
 
 // Upload sends monthly stats to the backend and returns the upload response.
@@ -83,7 +86,7 @@ func Upload(ctx context.Context, jwt string, device *auth.DeviceInfo, stats *Mon
 		return nil, fmt.Errorf("marshal upload payload: %w", err)
 	}
 
-	url := auth.APIBase + "/api/upload"
+	url := auth.APIBase + "/api/v2/upload"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("build upload request: %w", err)

@@ -1,10 +1,19 @@
 /**
- * POST /api/upload
+ * POST /api/upload    (v1 — backward compatible, kept forever)
+ * POST /api/v2/upload (v2 — explicitly versioned, same logic)
+ *
+ * Both endpoints accept the same payload and produce the same response.
+ * The only behavioral guarantee difference:
+ *   v1: `source` field in response may or may not be present (added in v1.1)
+ *   v2: `source` field is always present in response
+ *
+ * Old clients that omit `source` in the request body continue to work on both
+ * versions — missing source defaults to "claude".
  *
  * Receives monthly usage statistics from an authenticated device.
- * Upserts the `uploads` table (one row per device+period).
+ * Upserts the `uploads` table (one row per device+period+source).
  * Refreshes the KV leaderboard cache for the given period.
- * Returns the user's current global rank for the period.
+ * Returns the user's current global rank for the period and source.
  */
 
 import { Hono } from 'hono';
@@ -31,7 +40,9 @@ interface UploadPayload {
   model_breakdown: Record<string, unknown>;
 }
 
-uploadRoutes.post('/upload', async (c) => {
+/** Handler for both v1 (/api/upload) and v2 (/api/v2/upload). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function handleUpload(c: any) {
   // Authenticate via Bearer JWT.
   const authHeader = c.req.header('Authorization') ?? '';
   if (!authHeader.startsWith('Bearer ')) {
@@ -121,12 +132,21 @@ uploadRoutes.post('/upload', async (c) => {
     refreshLeaderboardCache(c.env.DB, c.env.LEADERBOARD, body.period, source),
   );
 
+  // Always include `source` in response so clients know which leaderboard the rank is for.
   return c.json({
     rank,
     total_users: totalUsers,
     share_url: `https://claude-top.a2d2.dev/u/${claims.login}`,
+    source,
   });
-});
+}
+
+// v1: /api/upload — kept forever for backward compatibility with old CLI versions.
+uploadRoutes.post('/upload', handleUpload);
+
+// v2: /api/v2/upload — explicitly versioned, same logic, same response shape.
+// New CLI versions should use this path.
+uploadRoutes.post('/v2/upload', handleUpload);
 
 /**
  * computeUserRank returns the rank (1-based) of a github_id for a given period and source.

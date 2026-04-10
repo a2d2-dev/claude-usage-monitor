@@ -113,18 +113,24 @@ type uploadState struct {
 	stats       *upload.MonthlyStats // populated in uploadConfirm (combined for "all")
 	claudeStats *upload.MonthlyStats // non-nil when source=all, for per-source display
 	codexStats  *upload.MonthlyStats // non-nil when source=all and codex data exists
-	rank        int                  // populated on uploadSuccess
-	total       int                  // total users, populated on uploadSuccess
+	results     []sourceRankResult   // populated on uploadSuccess, one per source
 	shareURL    string               // populated on uploadSuccess
 	errMsg      string               // populated on uploadError
 }
 
 // ── Upload tea messages ────────────────────────────────────────────────────────
 
+// sourceRankResult holds the rank result for one data source.
+type sourceRankResult struct {
+	Source string
+	Rank   int
+	Total  int
+}
+
 // uploadResultMsg is sent when the upload API call completes.
 type uploadResultMsg struct {
-	Rank     int
-	Total    int
+	// Results holds per-source rank results (one entry per uploaded source).
+	Results  []sourceRankResult
 	ShareURL string
 	Err      error
 }
@@ -951,8 +957,7 @@ func (m Model) handleUploadResult(msg uploadResultMsg) (tea.Model, tea.Cmd) {
 	}
 	m.uploadOverlay = uploadState{
 		phase:    uploadSuccess,
-		rank:     msg.Rank,
-		total:    msg.Total,
+		results:  msg.Results,
 		shareURL: msg.ShareURL,
 	}
 	return m, nil
@@ -978,7 +983,8 @@ func doUploadCmd(jwt string, blocks []data.SessionBlock, modelSource string) tea
 			sources = []string{"claude", "codex"}
 		}
 
-		var lastResp *upload.UploadResponse
+		var results []sourceRankResult
+		var shareURL string
 		for _, src := range sources {
 			stats, aggErr := upload.AggregateCurrentMonth(blocks, src)
 			if aggErr != nil {
@@ -992,16 +998,27 @@ func doUploadCmd(jwt string, blocks []data.SessionBlock, modelSource string) tea
 			if uploadErr != nil {
 				return uploadResultMsg{Err: uploadErr}
 			}
-			lastResp = resp
+			// Use source from response if present, fall back to request source.
+			respSource := resp.Source
+			if respSource == "" {
+				respSource = src
+			}
+			results = append(results, sourceRankResult{
+				Source: respSource,
+				Rank:   resp.Rank,
+				Total:  resp.TotalUsers,
+			})
+			if shareURL == "" {
+				shareURL = resp.ShareURL
+			}
 		}
 
-		if lastResp == nil {
+		if len(results) == 0 {
 			return uploadResultMsg{Err: fmt.Errorf("当前月没有可上传的数据")}
 		}
 		return uploadResultMsg{
-			Rank:     lastResp.Rank,
-			Total:    lastResp.TotalUsers,
-			ShareURL: lastResp.ShareURL,
+			Results:  results,
+			ShareURL: shareURL,
 		}
 	}
 }

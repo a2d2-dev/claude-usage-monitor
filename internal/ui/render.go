@@ -956,13 +956,22 @@ func renderUploadOverlay(m Model, height int) string {
 		lines = []string{
 			sectionTitleStyle.Render("  ✓ 上传成功"),
 			"",
-			fmt.Sprintf("  %-12s %s", "全球排名：",
-				accentValueStyle.Render(fmt.Sprintf("#%d / %d", st.rank, st.total))),
+		}
+		// Show per-source rankings.
+		for _, r := range st.results {
+			label := "Claude Code 排名："
+			if r.Source == "codex" {
+				label = "Codex CLI 排名："
+			}
+			lines = append(lines, fmt.Sprintf("  %-16s %s", label,
+				accentValueStyle.Render(fmt.Sprintf("#%d / %d", r.Rank, r.Total))))
+		}
+		lines = append(lines,
 			"",
 			"  分享链接：",
 			"",
-			lipgloss.NewStyle().Foreground(colorSuccess).Render("     " + st.shareURL),
-		}
+			lipgloss.NewStyle().Foreground(colorSuccess).Render("     "+st.shareURL),
+		)
 
 	case uploadError:
 		lines = []string{
