@@ -282,17 +282,12 @@ func historyDataRow(s data.SessionBlock, colW [6]int, cursor bool, showSource bo
 		dirStr,
 	}
 
-	rowStyle := mutedStyle
-	if cursor {
-		rowStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorText).
-			Background(lipgloss.Color("#374151"))
-	}
-
+	// Render each column with only width/truncation using muted style (no background).
+	// Applying background per-column causes accumulated ANSI escapes to push the
+	// row past the terminal width, making the last column wrap to a new line.
 	parts := make([]string, 6)
 	for i, c := range cols {
-		parts[i] = rowStyle.Width(colW[i]).Render(truncateStr(c, colW[i]))
+		parts[i] = mutedStyle.Width(colW[i]).Render(truncateStr(c, colW[i]))
 	}
 
 	// Build prefix: cursor indicator + optional source tag.
@@ -301,6 +296,7 @@ func historyDataRow(s data.SessionBlock, colW [6]int, cursor bool, showSource bo
 		cursorIndicator = "▶ "
 	}
 
+	var row string
 	if showSource {
 		// Source tag: [C] for claude, [X] for codex, [?] for unknown.
 		var sourceTag string
@@ -314,10 +310,22 @@ func historyDataRow(s data.SessionBlock, colW [6]int, cursor bool, showSource bo
 		if cursor {
 			prefix = "▶" + sourceTag + " "
 		}
-		return prefix + strings.Join(parts, " ")
+		row = prefix + strings.Join(parts, " ")
+	} else {
+		row = cursorIndicator + strings.Join(parts, " ")
 	}
 
-	return cursorIndicator + strings.Join(parts, " ")
+	// Apply cursor highlight to the entire row as a single render call to avoid
+	// per-column background accumulation that causes terminal line wrapping.
+	if cursor {
+		row = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(colorText).
+			Background(lipgloss.Color("#374151")).
+			Render(row)
+	}
+
+	return row
 }
 
 // ── Detail panel (shared by Sessions tab) ─────────────────────────────────────
