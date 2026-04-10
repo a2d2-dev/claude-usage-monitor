@@ -81,16 +81,31 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          merge-multiple: true
-          path: dist/
+          pattern: bin-*
+          path: dist-staging/
 
       - name: Rename for release
         run: |
-          cd dist
-          for f in claude-top claude-top.exe; do
-            [ -f "$f" ] && mv "$f" "claude-top-${f##claude-top}"  || true
+          mkdir -p dist
+          for dir in dist-staging/bin-*/; do
+            pkg="${dir#dist-staging/bin-}"
+            pkg="${pkg%/}"
+            case "$pkg" in
+              claude-top-darwin-x64)   out="claude-top-darwin-x86_64" ;;
+              claude-top-darwin-arm64) out="claude-top-darwin-arm64" ;;
+              claude-top-linux-x64)    out="claude-top-linux-x86_64" ;;
+              claude-top-linux-arm64)  out="claude-top-linux-arm64" ;;
+              claude-top-windows-x64)  out="claude-top-windows-x86_64.exe" ;;
+              *) echo "Unknown package: $pkg"; exit 1 ;;
+            esac
+            if [ -f "${dir}claude-top.exe" ]; then
+              cp "${dir}claude-top.exe" "dist/$out"
+            else
+              cp "${dir}claude-top" "dist/$out"
+              chmod +x "dist/$out"
+            fi
           done
-          ls -lh
+          ls -lh dist/
 
       - name: Create checksums
         working-directory: dist
