@@ -1,6 +1,6 @@
 # claude-top
 
-Terminal UI for monitoring [Claude Code](https://claude.ai/code) token and cost usage in real time.
+Terminal UI for monitoring [Claude Code](https://claude.ai/code) and [Codex CLI](https://github.com/openai/codex) token and cost usage in real time.
 
 ## Screenshots
 
@@ -10,10 +10,13 @@ Terminal UI for monitoring [Claude Code](https://claude.ai/code) token and cost 
 
 ## Features
 
-- **Overview** — active session progress bar, burn rate, time remaining
-- **Sessions** — sortable history table, drill into any session for per-message cost breakdown
+- **Overview** — active session progress bar, burn rate, time remaining; per-source stats when using `--source all`
+- **Sessions** — sortable history table with `[C]`/`[X]` source badges, drill into any session for per-message cost breakdown
 - **Daily** — 52-week contribution graph, cost summary, scrollable per-day table
-- Chart highlights the selected message's position in time
+- **Message Detail** — full user prompt, tool calls & results, assistant response loaded on demand (Claude Code sessions)
+- **Codex CLI support** — reads `~/.codex/sessions`, calculates cost from OpenAI pricing
+- **Leaderboard upload** — compete globally at [claude-top.a2d2.dev](https://claude-top.a2d2.dev); Claude Code and Codex CLI tracked on separate leaderboards, per-source rank shown on success
+- Chart highlights the selected message's position in time with intermediate X-axis ticks and cross-midnight date labels
 - Auto-refreshes every 10 seconds; press `r` to force refresh
 
 ## Installation
@@ -58,11 +61,26 @@ chmod +x claude-top-*
 ## Usage
 
 ```
-claude-top [--plan <plan>] [--data-path <path>]
+claude-top [flags]
 
 Flags:
-  --plan        Subscription plan: pro, max5, max20  (default: pro)
-  --data-path   Path to Claude projects dir          (default: ~/.claude/projects)
+  --plan         Subscription plan: pro, max5, max20        (default: pro)
+  --data-path    Path to Claude projects dir                (default: ~/.claude/projects)
+  --source       Data source: all, claude, or codex         (default: all)
+  --codex-path   Path to Codex CLI sessions dir             (default: ~/.codex/sessions)
+```
+
+### Examples
+
+```bash
+# Show both Claude Code and Codex CLI usage (default)
+claude-top
+
+# Show only Claude Code
+claude-top --source claude
+
+# Show only Codex CLI
+claude-top --source codex
 ```
 
 ## Keyboard shortcuts
@@ -74,16 +92,26 @@ Flags:
 | `↑` / `↓` or `k` / `j` | Move cursor |
 | `PgUp` / `PgDn` | Page up / down (Sessions) |
 | `g` / `G` | Jump to top / bottom |
-| `Enter` | Open session detail |
-| `Esc` | Back to session list |
+| `Enter` | Open session / message detail |
+| `Esc` | Back |
 | `s` / `S` | Cycle sort column forward / backward |
 | `/` | Toggle sort direction |
 | `r` | Force refresh |
+| `u` | Upload stats to global leaderboard |
+| `,` / `o` | Open settings |
 | `q` | Quit |
+
+## Leaderboard
+
+Upload your monthly stats to compete globally at [claude-top.a2d2.dev](https://claude-top.a2d2.dev).
+
+- Press `u` in the TUI to authenticate with GitHub and upload
+- Claude Code and Codex CLI stats are tracked on separate leaderboards
+- Only aggregated token counts and costs are uploaded — no prompts, file paths, or session content
 
 ## Requirements
 
-Claude Code stores usage data in `~/.claude/projects/`. The monitor reads those JSONL files directly — no network access, no accounts, fully local.
+Claude Code stores session data in `~/.claude/projects/`. Codex CLI stores session data in `~/.codex/sessions/`. Both are read directly — no network access required for local monitoring.
 
 ## License
 
