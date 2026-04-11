@@ -9,9 +9,25 @@ permissions:
   contents: write
 
 jobs:
+  # ── Step 0: Run unit tests ────────────────────────────────────────────────────
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
   # ── Step 1: Cross-compile Go binaries ────────────────────────────────────────
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       matrix:
