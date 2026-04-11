@@ -91,14 +91,13 @@ func TestLoadCodexEntries_MissingDir(t *testing.T) {
 	}
 }
 
-// TestParseCodexFile_TokenDedup verifies streaming deduplication in parseCodexFile.
-// The pending-entry buffer pattern ensures only the FINAL token_count snapshot per AI
-// turn is emitted — intermediate streaming updates are overwritten, not accumulated.
+// TestParseCodexFile_MultiTurn verifies that parseCodexFile emits one entry per
+// token_count event across multiple AI turns in a session.
 //
-// Session layout: one user turn with 3 streaming token_count events.
-// The 3rd event is identical to the 2nd (duplicate streaming delivery).
-// Expected result: exactly 1 entry (the final/unique value of the turn).
-func TestParseCodexFile_TokenDedup(t *testing.T) {
+// Each token_count event carries the complete per-turn delta in last_token_usage,
+// so entries are emitted immediately without buffering. A two-turn session produces
+// two entries with correct token counts and metadata.
+func TestParseCodexFile_MultiTurn(t *testing.T) {
 	dir := t.TempDir()
 	sessionDir := filepath.Join(dir, "2026", "04", "10")
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
@@ -106,17 +105,17 @@ func TestParseCodexFile_TokenDedup(t *testing.T) {
 	}
 	filePath := filepath.Join(sessionDir, "test-session.jsonl")
 
-	// session_meta → turn_context → user_message → 3 token_count events (2 distinct, 1 dupe).
+	// Two-turn session:
+	//   Turn 1: user_message → token_count (100 input, 50 output)
+	//   Turn 2: turn_context (model update) → token_count (200 input/10 cached, 80+5 output)
 	lines := []string{
 		`{"timestamp":"2026-04-10T00:00:00Z","type":"session_meta","payload":{"id":"sess-test-001"}}`,
 		`{"timestamp":"2026-04-10T00:00:01Z","type":"turn_context","payload":{"model":"codex-mini-latest"}}`,
 		`{"timestamp":"2026-04-10T00:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"hello codex","images":[]}}`,
-		// Streaming intermediate 1 (overwritten by the next update).
 		`{"timestamp":"2026-04-10T00:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":0}}}}`,
-		// Streaming final — the value that should be recorded.
-		`{"timestamp":"2026-04-10T00:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"cached_input_tokens":10,"output_tokens":80,"reasoning_output_tokens":5}}}}`,
-		// Duplicate of the previous line (common in Codex streaming — should be ignored).
-		`{"timestamp":"2026-04-10T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"cached_input_tokens":10,"output_tokens":80,"reasoning_output_tokens":5}}}}`,
+		`{"timestamp":"2026-04-10T00:00:04Z","type":"turn_context","payload":{"model":"codex-mini-latest"}}`,
+		`{"timestamp":"2026-04-10T00:00:05Z","type":"event_msg","payload":{"type":"user_message","message":"second prompt","images":[]}}`,
+		`{"timestamp":"2026-04-10T00:00:06Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"cached_input_tokens":10,"output_tokens":80,"reasoning_output_tokens":5}}}}`,
 	}
 
 	content := ""
@@ -132,31 +131,42 @@ func TestParseCodexFile_TokenDedup(t *testing.T) {
 		t.Fatalf("parseCodexFile error: %v", err)
 	}
 
-	// One turn → one entry (the final token_count value; intermediates are overwritten).
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry (pending-buffer keeps only final snapshot), got %d", len(entries))
+	// Two turns → two entries (one per token_count event).
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries (one per turn), got %d", len(entries))
 	}
 
-	// Verify the emitted entry reflects the FINAL token_count values.
-	// OpenAI input_tokens includes cached, so non-cached = 200 - 10 = 190.
-	e := entries[0]
-	if e.InputTokens != 190 {
-		t.Errorf("InputTokens: want 190 (200-10 cached), got %d", e.InputTokens)
+	// Turn 1: non-cached input = 100 - 0 = 100, output = 50.
+	e0 := entries[0]
+	if e0.InputTokens != 100 {
+		t.Errorf("turn1 InputTokens: want 100, got %d", e0.InputTokens)
 	}
-	if e.OutputTokens != 85 {
-		t.Errorf("OutputTokens: want 85 (80+5 reasoning), got %d", e.OutputTokens)
+	if e0.OutputTokens != 50 {
+		t.Errorf("turn1 OutputTokens: want 50, got %d", e0.OutputTokens)
 	}
-	if e.CacheReadTokens != 10 {
-		t.Errorf("CacheReadTokens: want 10, got %d", e.CacheReadTokens)
+	if e0.UserPrompt != "hello codex" {
+		t.Errorf("turn1 UserPrompt: want 'hello codex', got %q", e0.UserPrompt)
 	}
-	if e.Source != "codex" {
-		t.Errorf("Source: want 'codex', got %q", e.Source)
+
+	// Turn 2: non-cached input = 200 - 10 = 190, output = 80 + 5 = 85.
+	e1 := entries[1]
+	if e1.InputTokens != 190 {
+		t.Errorf("turn2 InputTokens: want 190 (200-10 cached), got %d", e1.InputTokens)
 	}
-	if e.Model != "codex-mini-latest" {
-		t.Errorf("Model: want 'codex-mini-latest', got %q", e.Model)
+	if e1.OutputTokens != 85 {
+		t.Errorf("turn2 OutputTokens: want 85 (80+5 reasoning), got %d", e1.OutputTokens)
 	}
-	if e.UserPrompt != "hello codex" {
-		t.Errorf("UserPrompt: want 'hello codex', got %q", e.UserPrompt)
+	if e1.CacheReadTokens != 10 {
+		t.Errorf("turn2 CacheReadTokens: want 10, got %d", e1.CacheReadTokens)
+	}
+	if e1.Source != "codex" {
+		t.Errorf("Source: want 'codex', got %q", e1.Source)
+	}
+	if e1.Model != "codex-mini-latest" {
+		t.Errorf("Model: want 'codex-mini-latest', got %q", e1.Model)
+	}
+	if e1.UserPrompt != "second prompt" {
+		t.Errorf("turn2 UserPrompt: want 'second prompt', got %q", e1.UserPrompt)
 	}
 }
 
