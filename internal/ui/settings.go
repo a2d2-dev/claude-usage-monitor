@@ -33,13 +33,37 @@ var settingsSourceOptions = []settingsSourceOption{
 	{"codex", "Codex CLI only"},
 }
 
+// settingsPlanOption holds a plan option displayed in the modal.
+type settingsPlanOption struct {
+	value string // "pro", "max5", "max20"
+	label string // display label
+}
+
+var settingsPlanOptions = []settingsPlanOption{
+	{"pro",   "Pro"},
+	{"max5",  "Max (5×)"},
+	{"max20", "Max (20×)"},
+}
+
+// settingsSection identifies which section of the settings modal has focus.
+type settingsSection int
+
+const (
+	settingsSectionSource settingsSection = iota
+	settingsSectionPlan
+	settingsSectionCodexPath
+)
+
 // settingsState holds the UI state for the Settings modal.
 type settingsState struct {
-	phase    settingsPhase
-	cursor   int    // index into settingsSourceOptions
-	selected string // current source value
+	phase     settingsPhase
+	section   settingsSection // which section has keyboard focus
+	srcCursor int    // index into settingsSourceOptions
+	planCursor int   // index into settingsPlanOptions
+	selected  string // current source value
+	plan      string // current plan value
 	codexPath string // editable codex path
-	editing  bool   // true when the codex path text field is focused
+	editing   bool   // true when the codex path text field is focused
 }
 
 // selectedSourceIndex returns the cursor index for a given source string.
@@ -52,6 +76,16 @@ func selectedSourceIndex(source string) int {
 	return 0 // default to "all"
 }
 
+// selectedPlanIndex returns the cursor index for a given plan key.
+func selectedPlanIndex(plan string) int {
+	for i, opt := range settingsPlanOptions {
+		if opt.value == plan {
+			return i
+		}
+	}
+	return 0 // default to "pro"
+}
+
 // ── Settings key handler ──────────────────────────────────────────────────────
 
 // handleSettingsKey processes key events when the Settings modal is open.
@@ -62,35 +96,67 @@ func (m Model) handleSettingsKey(key string) (Model, settingsReloadMsg) {
 		m.settings.phase = settingsIdle
 		return m, settingsReloadMsg{}
 
+	case "tab", "shift+tab":
+		// Cycle between sections: Source → Plan → Codex Path → Source
+		if m.settings.editing {
+			m.settings.editing = false
+		} else if key == "shift+tab" {
+			m.settings.section = (m.settings.section + settingsSectionCodexPath) % (settingsSectionCodexPath + 1)
+		} else {
+			m.settings.section = (m.settings.section + 1) % (settingsSectionCodexPath + 1)
+			if m.settings.section == settingsSectionCodexPath {
+				m.settings.editing = true
+			}
+		}
+
 	case "up", "k":
-		if !m.settings.editing && m.settings.cursor > 0 {
-			m.settings.cursor--
+		if m.settings.editing {
+			break
+		}
+		switch m.settings.section {
+		case settingsSectionSource:
+			if m.settings.srcCursor > 0 {
+				m.settings.srcCursor--
+			}
+		case settingsSectionPlan:
+			if m.settings.planCursor > 0 {
+				m.settings.planCursor--
+			}
 		}
 
 	case "down", "j":
-		if !m.settings.editing && m.settings.cursor < len(settingsSourceOptions)-1 {
-			m.settings.cursor++
+		if m.settings.editing {
+			break
 		}
-
-	case "tab":
-		// Toggle between source list and codex path field.
-		m.settings.editing = !m.settings.editing
+		switch m.settings.section {
+		case settingsSectionSource:
+			if m.settings.srcCursor < len(settingsSourceOptions)-1 {
+				m.settings.srcCursor++
+			}
+		case settingsSectionPlan:
+			if m.settings.planCursor < len(settingsPlanOptions)-1 {
+				m.settings.planCursor++
+			}
+		}
 
 	case "enter":
 		if m.settings.editing {
-			// Confirm codex path edit, return to source list.
+			// Confirm codex path edit.
 			m.settings.editing = false
+			m.settings.section = settingsSectionSource
 		} else {
-			// Save and apply selected source.
-			selected := settingsSourceOptions[m.settings.cursor].value
-			m.settings.selected = selected
-			m.source = selected
+			// Save all settings and close.
+			src := settingsSourceOptions[m.settings.srcCursor].value
+			plan := settingsPlanOptions[m.settings.planCursor].value
+			m.settings.selected = src
+			m.settings.plan = plan
+			m.source = src
+			m.plan = core.GetPlan(plan)
 			m.codexPath = m.settings.codexPath
 			m.settings.phase = settingsIdle
 			// Persist to config.
-			cfg := config.Config{Source: selected, CodexPath: m.settings.codexPath}
+			cfg := config.Config{Source: src, Plan: plan, CodexPath: m.settings.codexPath}
 			_ = config.Save(cfg)
-			// Signal caller to reload data.
 			return m, settingsReloadMsg{reload: true}
 		}
 
@@ -104,7 +170,6 @@ func (m Model) handleSettingsKey(key string) (Model, settingsReloadMsg) {
 					m.settings.codexPath = string(runes[:len(runes)-1])
 				}
 			default:
-				// Append printable characters.
 				if len(key) == 1 {
 					m.settings.codexPath += key
 				}
@@ -131,18 +196,31 @@ func renderSettingsOverlay(m Model, height int) string {
 	lines := []string{
 		sectionTitleStyle.Render("  SETTINGS"),
 		"",
-		labelStyle.Render("  Data Source:"),
 	}
 
-	// Source options list.
+	// ── Data Source section ──
+	srcActive := m.settings.section == settingsSectionSource
+	lines = append(lines, renderSettingsSectionHeader("Data Source", srcActive))
 	for i, opt := range settingsSourceOptions {
-		line := renderSettingsOption(opt.label, i == m.settings.cursor, i == m.settings.cursor && !m.settings.editing)
-		lines = append(lines, line)
+		isCursor := i == m.settings.srcCursor
+		lines = append(lines, renderSettingsOption(opt.label, isCursor, isCursor && srcActive))
 	}
 
 	lines = append(lines, "")
-	// Codex path field.
-	codexPathLabel := labelStyle.Render("  Codex Path:")
+
+	// ── Plan section ──
+	planActive := m.settings.section == settingsSectionPlan
+	lines = append(lines, renderSettingsSectionHeader("Claude Code Plan", planActive))
+	for i, opt := range settingsPlanOptions {
+		isCursor := i == m.settings.planCursor
+		lines = append(lines, renderSettingsOption(opt.label, isCursor, isCursor && planActive))
+	}
+
+	lines = append(lines, "")
+
+	// ── Codex Path field ──
+	pathActive := m.settings.section == settingsSectionCodexPath
+	lines = append(lines, renderSettingsSectionHeader("Codex Path", pathActive))
 	codexPathValue := m.settings.codexPath
 	if codexPathValue == "" {
 		codexPathValue = mutedStyle.Render("~/.codex/sessions (default)")
@@ -150,7 +228,6 @@ func renderSettingsOverlay(m Model, height int) string {
 	if m.settings.editing {
 		codexPathValue = accentValueStyle.Render(codexPathValue + "█")
 	}
-	lines = append(lines, codexPathLabel)
 	lines = append(lines, "    "+codexPathValue)
 	lines = append(lines, "")
 
@@ -158,12 +235,20 @@ func renderSettingsOverlay(m Model, height int) string {
 	if m.settings.editing {
 		lines = append(lines, mutedStyle.Render("  Type path  Tab switch  Enter confirm  Esc cancel"))
 	} else {
-		lines = append(lines, mutedStyle.Render("  ↑↓ select  Tab codex path  Enter save  Esc cancel"))
+		lines = append(lines, mutedStyle.Render("  ↑↓ select  Tab next section  Enter save  Esc cancel"))
 	}
 
 	content := padToHeight(strings.Join(lines, "\n"), height-2)
 	boxStyle := cardStyle.Width(innerW).Height(height - 2)
 	return boxStyle.Render(content)
+}
+
+// renderSettingsSectionHeader renders a section label, highlighted when active.
+func renderSettingsSectionHeader(label string, active bool) string {
+	if active {
+		return accentValueStyle.Render("  " + label + ":")
+	}
+	return labelStyle.Render("  " + label + ":")
 }
 
 // renderSettingsOption renders one source option row in the settings modal.
@@ -184,10 +269,13 @@ func renderSettingsOption(label string, isCursor bool, isActive bool) string {
 // openSettings opens the Settings modal, pre-populated with current settings.
 func (m Model) openSettings() Model {
 	m.settings = settingsState{
-		phase:     settingsOpen,
-		cursor:    selectedSourceIndex(m.source),
-		selected:  m.source,
-		codexPath: m.codexPath,
+		phase:      settingsOpen,
+		section:    settingsSectionSource,
+		srcCursor:  selectedSourceIndex(m.source),
+		planCursor: selectedPlanIndex(m.plan.Name),
+		selected:   m.source,
+		plan:       m.plan.Name,
+		codexPath:  m.codexPath,
 	}
 	return m
 }

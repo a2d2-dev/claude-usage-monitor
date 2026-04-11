@@ -13,6 +13,8 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
@@ -238,14 +240,37 @@ func benchLoadEntries(b *testing.B, sessions, msgsPerSession int) {
 			entries []UsageEntry
 		}
 
+		// Parse in parallel using the same 4-worker pool as production LoadEntries.
 		results := make([]parsedFile, len(toparse))
-		// Single-threaded parse to match old code behavior for comparison.
-		for i, fp := range toparse {
-			fe, parseErr := parseFile(fp)
-			if parseErr != nil {
-				continue
+		if len(toparse) > 0 {
+			workers := min(runtime.NumCPU(), 4)
+			if workers > len(toparse) {
+				workers = len(toparse)
 			}
-			results[i] = parsedFile{path: fp, modTime: toparseInfo[fp].ModTime(), entries: fe}
+			type job struct {
+				idx  int
+				path string
+			}
+			jobs := make(chan job, len(toparse))
+			for i, fp := range toparse {
+				jobs <- job{i, fp}
+			}
+			close(jobs)
+			var wg sync.WaitGroup
+			for range workers {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for j := range jobs {
+						fe, parseErr := parseFile(j.path)
+						if parseErr != nil {
+							continue
+						}
+						results[j.idx] = parsedFile{path: j.path, modTime: toparseInfo[j.path].ModTime(), entries: fe}
+					}
+				}()
+			}
+			wg.Wait()
 		}
 
 		for _, r := range results {

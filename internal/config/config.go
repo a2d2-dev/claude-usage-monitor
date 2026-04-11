@@ -16,6 +16,9 @@ type Config struct {
 	// CodexPath is the path to the Codex sessions directory.
 	// Defaults to ~/.codex/sessions when empty.
 	CodexPath string `json:"codex_path,omitempty"`
+	// Plan is the subscription plan key: "pro", "max5", "max20".
+	// Defaults to "pro" when not set.
+	Plan string `json:"plan,omitempty"`
 }
 
 // configPath returns the path to the config file: ~/.claude-top/config.json.

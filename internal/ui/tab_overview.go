@@ -97,6 +97,22 @@ func renderOverview(m Model, height int) string {
 		)
 	}
 
+	// ── Codex exec-gap warning ────────────────────────────────────────────────
+	// Exec-mode Codex sessions do not write token_count events to their JSONL
+	// files, so they are billed by OpenAI but invisible to claude-top.
+	if m.codexExecGap > 0 {
+		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+		fixedLines = append(fixedLines,
+			fmt.Sprintf("  %s %s",
+				warnStyle.Render("⚠"),
+				mutedStyle.Render(fmt.Sprintf(
+					"%d Codex exec-mode session(s) have no local billing data — check your OpenAI dashboard for complete Codex costs.",
+					m.codexExecGap,
+				)),
+			),
+		)
+	}
+
 	// ── Cost chart: fixed height like tokscale ───────────────────────────────
 	const chartH = 10
 

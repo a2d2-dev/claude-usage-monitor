@@ -3,8 +3,10 @@
 //
 // Usage:
 //
-//	claude-usage-monitor [--plan pro|max5|max20] [--data-path /path/to/projects]
+//	claude-usage-monitor [--claude-path /path/to/projects]
 //	                     [--source all|claude|codex] [--codex-path /path/to/codex/sessions]
+//
+// Plan and other settings are configured interactively with the 's' key inside the TUI.
 package main
 
 import (
@@ -20,20 +22,14 @@ import (
 )
 
 func main() {
-	planName  := flag.String("plan", "pro", "Subscription plan: pro, max5, max20")
-	dataPath  := flag.String("data-path", "", "Path to Claude projects dir (default: ~/.claude/projects)")
-	source    := flag.String("source", "all", "Data source: all, claude, or codex")
-	codexPath := flag.String("codex-path", "", "Path to Codex sessions dir (default: ~/.codex/sessions)")
+	claudePath := flag.String("claude-path", "", "Path to Claude projects dir (default: ~/.claude/projects)")
+	source     := flag.String("source", "all", "Data source: all, claude, or codex")
+	codexPath  := flag.String("codex-path", "", "Path to Codex sessions dir (default: ~/.codex/sessions)")
 	flag.Parse()
 
-	// Load persisted config as fallback for flags not explicitly set.
+	// Load persisted config; CLI flags override only when explicitly provided.
 	cfg := config.Load()
 
-	// CLI flags override persisted config; flags default to "" meaning "use config".
-	// --source defaults to "all" in the flag definition, but we check if the user
-	// actually passed it by comparing against the default value.
-	// Use config value when the flag was left at its default "all" and config differs.
-	// (A user who explicitly passes --source all still gets "all" — no conflict.)
 	if *source == "all" && cfg.Source != "" && cfg.Source != "all" {
 		*source = cfg.Source
 	}
@@ -50,25 +46,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Resolve default Claude data path (only needed when source includes claude).
-	if *dataPath == "" {
+	// Resolve default Claude data path.
+	if *claudePath == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "cannot determine home directory: %v\n", err)
 			os.Exit(1)
 		}
-		*dataPath = filepath.Join(home, ".claude", "projects")
+		*claudePath = filepath.Join(home, ".claude", "projects")
 	}
 
 	// Verify Claude data path when it's needed (not codex-only mode).
 	if *source != "codex" {
-		if _, err := os.Stat(*dataPath); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "data path does not exist: %s\n", *dataPath)
+		if _, err := os.Stat(*claudePath); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "claude path does not exist: %s\n", *claudePath)
 			os.Exit(1)
 		}
 	}
 
-	model := ui.NewModel(*planName, *dataPath, *source, *codexPath)
+	// Plan comes from persisted config; default to "pro".
+	planName := cfg.Plan
+	if planName == "" {
+		planName = "pro"
+	}
+
+	model := ui.NewModel(planName, *claudePath, *source, *codexPath)
 	prog := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := prog.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error running monitor: %v\n", err)

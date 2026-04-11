@@ -407,6 +407,35 @@ func LoadCodexEntries(dataPath string) ([]UsageEntry, error) {
 	return entries, nil
 }
 
+// CountCodexUntrackedSessions returns the number of Codex session files in the
+// on-disk cache that yielded zero usage entries.
+//
+// Codex CLI exec-mode sessions (source:"exec") do not emit token_count events
+// into their JSONL files, so they are billed by OpenAI but invisible to
+// claude-top. These cached-but-empty files are the exec sessions.
+//
+// Returns 0 if the cache doesn't exist or the directory is missing.
+func CountCodexUntrackedSessions(dataPath string) int {
+	if dataPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return 0
+		}
+		dataPath = filepath.Join(home, ".codex", "sessions")
+	}
+	if _, err := os.Stat(dataPath); os.IsNotExist(err) {
+		return 0
+	}
+	store := loadCache(codexCachePath())
+	count := 0
+	for _, fc := range store.Files {
+		if len(fc.Entries) == 0 {
+			count++
+		}
+	}
+	return count
+}
+
 // LoadCodexCached reads only the on-disk gob cache for Codex entries and returns
 // whatever was stored there, without touching any JSONL files.
 // Returns nil entries (no error) when no cache exists.

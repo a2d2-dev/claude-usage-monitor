@@ -167,9 +167,10 @@ type tickMsg time.Time
 
 // loadedMsg carries session data from either a quick cache read or a full refresh.
 type loadedMsg struct {
-	blocks    []data.SessionBlock
-	err       error
-	fromCache bool // true = preliminary data from gob cache; full refresh still pending
+	blocks          []data.SessionBlock
+	err             error
+	fromCache       bool // true = preliminary data from gob cache; full refresh still pending
+	codexExecGap    int  // number of Codex exec sessions with no billing data
 }
 
 // msgDetailLoadedMsg is sent when on-demand message detail loading completes.
@@ -215,6 +216,11 @@ type Model struct {
 	// refreshing is true while a full disk refresh runs in the background.
 	refreshing  bool
 	lastRefresh time.Time
+
+	// codexExecGap is the count of Codex exec-mode sessions that have no billing
+	// data in their JSONL files. These are billed by OpenAI but invisible to
+	// claude-top. Shown as a warning in the Overview tab.
+	codexExecGap int
 
 	// Tab navigation.
 	tab tabID
@@ -287,6 +293,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshing = false
 		m.loading = false
 		m.lastRefresh = time.Now()
+		m.codexExecGap = msg.codexExecGap
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
@@ -763,7 +770,12 @@ func loadData(dataPath, codexPath, source string) tea.Cmd {
 			return loadedMsg{err: err}
 		}
 		blocks := core.BuildSessionBlocks(entries)
-		return loadedMsg{blocks: blocks}
+		// Count exec sessions only when Codex data is included.
+		gap := 0
+		if source == "all" || source == "codex" {
+			gap = data.CountCodexUntrackedSessions(codexPath)
+		}
+		return loadedMsg{blocks: blocks, codexExecGap: gap}
 	}
 }
 

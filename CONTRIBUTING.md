@@ -46,13 +46,18 @@ go test -bench=. -benchmem -benchtime=3s -timeout=600s ./internal/data/...
 
 | Benchmark | Baseline (Apple M1) | Concern threshold |
 |---|---|---|
-| `BenchmarkParseFile` | ~1.25ms/op | > 3ms/op |
-| `BenchmarkLoadEntries_1k` | ~420ms/op | > 1s/op |
-| `BenchmarkLoadEntries_10k` | ~3.8s/op | > 8s/op |
+| `BenchmarkParseFile` | ~1.80ms/op | > 5ms/op |
+| `BenchmarkLoadEntries_1k` | ~400ms/op | > 1.5s/op |
+| `BenchmarkLoadEntries_10k` | ~11s/op | > 30s/op |
 | `BenchmarkLoadEntries_WarmCache_1k` | ~6ms/op | > 30ms/op |
 | `BenchmarkLoadEntries_WarmCache_10k` | ~83ms/op | > 300ms/op |
 | `BenchmarkCacheLoad_200k_entries` | ~3µs/op | > 1ms/op |
 | `BenchmarkFindJSONLFiles_10k` | ~15ms/op | > 60ms/op |
+
+> **Note:** Cold-parse benchmarks (`LoadEntries_*`) use the same 4-worker parallel pool as
+> production `LoadEntries()`. The gob cache is wiped before each iteration, so all 10k JSONL
+> files are fully re-parsed. Baseline timings assume OS page cache is warm (files were just
+> written by the synthetic data generator).
 
 If any metric crosses its concern threshold, investigate before releasing.
 

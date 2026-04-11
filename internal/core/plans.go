@@ -25,14 +25,14 @@ var predefinedPlans = map[string]Plan{
 	},
 	"max5": {
 		Name:         "max5",
-		DisplayName:  "Max 5×",
+		DisplayName:  "Max (5×)",
 		TokenLimit:   88_000,
 		CostLimit:    35.0,
 		MessageLimit: 1_000,
 	},
 	"max20": {
 		Name:         "max20",
-		DisplayName:  "Max 20×",
+		DisplayName:  "Max (20×)",
 		TokenLimit:   220_000,
 		CostLimit:    140.0,
 		MessageLimit: 2_000,
