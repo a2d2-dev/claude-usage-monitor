@@ -3,8 +3,10 @@
 //
 // Usage:
 //
-//	claude-usage-monitor [--claude-path /path/to/projects]
-//	                     [--source all|claude|codex] [--codex-path /path/to/codex/sessions]
+//	claude-top [--claude-path /path/to/projects]
+//	           [--source all|claude|codex] [--codex-path /path/to/codex/sessions]
+//	claude-top update   – download and install the latest release
+//	claude-top version  – print the current version
 //
 // Plan and other settings are configured interactively with the 's' key inside the TUI.
 package main
@@ -19,9 +21,29 @@ import (
 
 	"github.com/a2d2-dev/claude-usage-monitor/internal/config"
 	"github.com/a2d2-dev/claude-usage-monitor/internal/ui"
+	"github.com/a2d2-dev/claude-usage-monitor/internal/update"
 )
 
+// version is set at build time via -ldflags "-X main.version=vX.Y.Z".
+// Falls back to "dev" for local builds.
+var version = "dev"
+
 func main() {
+	// Handle subcommands before flag parsing so they work without flag boilerplate.
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "update":
+			if err := update.Run(version); err != nil {
+				fmt.Fprintf(os.Stderr, "update failed: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "version", "--version", "-v":
+			fmt.Println(version)
+			return
+		}
+	}
+
 	claudePath := flag.String("claude-path", "", "Path to Claude projects dir (default: ~/.claude/projects)")
 	source     := flag.String("source", "all", "Data source: all, claude, or codex")
 	codexPath  := flag.String("codex-path", "", "Path to Codex sessions dir (default: ~/.codex/sessions)")
